@@ -55,6 +55,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private let settingsRule = AppWindow.rule()
     private let about = AppWindow.label("About", size: 15)
     private let credit = AppWindow.label("Created by Nikhil Sharma with assistance from OpenAI’s ChatGPT models.", size: 13)
+    private let inspiration = AppWindow.label("Inspired by Caffeine by Dominic Rodemer.", size: 13)
     private let version = AppWindow.label("", size: 13)
     private let license = AppWindow.label("Open source · MIT License", size: 13)
     private var cachedRecents: [Int]?
@@ -120,7 +121,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         for (view, id) in [(title, "duration"), (time, "time"), (slider, "slider"), (minus, "minus"), (plus, "plus"), (recentTitle, "history-label"), (recent, "history"), (recentEmpty, "history-empty"), (mainRule, "main-rule"), (mac, "mac-checkbox"), (macLock, "mac-lock"), (screen, "screen-checkbox"), (battery, "battery"), (notice, "notice"), (start, "action"), (extend, "extend")] as [(NSView, String)] {
             view.identifier = NSUserInterfaceItemIdentifier(id); main.addSubview(view)
         }
-        for (view, id) in [(login, "login-checkbox"), (loginNote, "login-note"), (approval, "login-approval"), (settingsRule, "settings-rule"), (about, "about"), (credit, "credit"), (version, "version"), (license, "license")] as [(NSView, String)] {
+        for (view, id) in [(login, "login-checkbox"), (loginNote, "login-note"), (approval, "login-approval"), (settingsRule, "settings-rule"), (about, "about"), (credit, "credit"), (inspiration, "inspiration"), (version, "version"), (license, "license")] as [(NSView, String)] {
             view.identifier = NSUserInterfaceItemIdentifier(id); settings.addSubview(view)
         }
         lockHint.identifier = NSUserInterfaceItemIdentifier("lock-hint")
@@ -139,8 +140,8 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         extend.onClick = { [weak self] in self?.onExtend?() }
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.8"
-        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-12"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.9"
+        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-13"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
     }
@@ -185,9 +186,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         login.frame = NSRect(x: 0, y: 0, width: available, height: 28)
         loginNote.frame = NSRect(x: 0, y: 39, width: available, height: 42)
         approval.frame = NSRect(x: 0, y: 90, width: 184, height: 32)
-        settingsRule.frame = NSRect(x: 0, y: 139, width: available, height: 1)
-        about.frame = NSRect(x: 0, y: 156, width: available, height: 23)
-        credit.frame = NSRect(x: 0, y: 191, width: available, height: 44)
+        settingsRule.frame = NSRect(x: 0, y: 126, width: available, height: 1)
+        about.frame = NSRect(x: 0, y: 143, width: available, height: 23)
+        credit.frame = NSRect(x: 0, y: 172, width: available, height: 44)
+        inspiration.frame = NSRect(x: 0, y: 222, width: available, height: 21)
         version.frame = NSRect(x: 0, y: 250, width: available, height: 21)
         license.frame = NSRect(x: 0, y: 282, width: available, height: 21)
     }

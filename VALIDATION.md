@@ -1,8 +1,14 @@
-# Cat Run 0.1.8 validation
+# Cat Run 0.1.9 validation
 
-Checked October 12, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
+Checked October 13, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Added the Caffeine attribution to About and the README. All 16 existing layout tests passed; the full behavior suite was not rerun for this text/layout change.
+- Version 0.1.9/build 10 was built, installed, and passed strict signature verification. A native Settings screenshot confirmed the attribution fits with the creator, version, and licence text.
+- Relaunch preserved the 90-minute selection, recent values of 90, 165, and 60 minutes, and enabled screen-awake setting. Launch at login remained off, and the timer remained inactive.
+
+## Checks retained from 0.1.8
 
 - Before initial GitHub publication, the complete 0.1.8 suite passed all 101 tests: 69 native and 32 core tests. The 38 publication files were checked for personal paths, email addresses, private keys, and common credential patterns; none were detected. This is a local check, not a GitHub Actions run.
 - Disabled button and checkbox labels now retain the full peach text color and brightness. Control behavior is unchanged. A source audit confirmed the app window's text uses the full foreground color; only the two custom disabled-title color attributes needed correction.
@@ -123,4 +129,4 @@ The following checks were performed on 0.1.0. They describe evidence for the ret
 - Visually inspect the menu-bar cat's randomly selected actions, five-second cadence, stacked countdown, and left-click/right-click interactions. The available UI inspection could not show the macOS menu bar, so its revised live rendering has not been visually verified. Also check its two-frame-per-second Low Power Mode behavior and motion suppression under Reduce Motion, sleeping displays, and thermal pressure. These conditions were not all reproduced interactively.
 - Longer idle/active energy profiling and a clean-machine public-release test.
 
-Quit other keep-awake utilities when checking sleep behavior. Cat Run releases only its own assertions; it cannot make another app release its requests. The locally signed app is for testing and has not been Developer ID signed or notarized. No GitHub publication has taken place.
+Quit other keep-awake utilities when checking sleep behavior. Cat Run releases only its own assertions; it cannot make another app release its requests. The locally signed app is for testing and has not been Developer ID signed or notarized. The source is published on GitHub; no signed or notarized binary release is provided.

@@ -1,6 +1,8 @@
 # Cat Run
 
-A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 12, 2026.
+A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 13, 2026.
+
+Inspired by Caffeine by Dominic Rodemer.
 
 ## Behavior
 
