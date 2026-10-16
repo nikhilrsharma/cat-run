@@ -140,8 +140,8 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         extend.onClick = { [weak self] in self?.onExtend?() }
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.9"
-        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-13"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.10"
+        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-16"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
     }

@@ -438,7 +438,21 @@ final class AppWindowLayoutTests: XCTestCase {
         var missing = recent
         missing.notice = "The battery reading is unavailable. Try again when battery protection can be verified."
         missing.battery = "Battery reading unavailable"; missing.canStart = false
-        return [empty, recent, active, stopped, missing]
+        let completion = Date(timeIntervalSince1970: 1_792_110_600)
+        let completed = [
+            ("en_US", "America/Toronto"),
+            ("en_GB", "Europe/London"),
+            ("de_DE", "Europe/Berlin"),
+            ("fr_FR", "Asia/Kolkata"),
+            ("en_NZ", "Pacific/Chatham")
+        ].map { locale, zone in
+            var state = recent
+            state.notice = SessionNotice.message(for: .expired, finishedAt: completion,
+                                                 locale: Locale(identifier: locale),
+                                                 timeZone: TimeZone(identifier: zone)!)
+            return state
+        }
+        return [empty, recent, active, stopped, missing] + completed
     }
 
     private var settingsStates: [WindowState] {

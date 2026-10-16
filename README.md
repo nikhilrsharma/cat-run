@@ -1,6 +1,6 @@
 # Cat Run
 
-A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 13, 2026.
+A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 16, 2026.
 
 Inspired by Caffeine by Dominic Rodemer.
 
@@ -10,6 +10,7 @@ Inspired by Caffeine by Dominic Rodemer.
 - Keep Mac awake is required during a timer. Keeping the display awake is optional. That choice and start at login can be changed only while the timer is inactive.
 - A static menu bar cat becomes periodically animated during a timer. A small two-line countdown shows two-digit hours above minutes beside the cat, for example `01` above `03`. Click to open the window; right-click for Open and Quit.
 - Below 15% battery, a timer cannot start and an active timer stops, including while connected to power. Exactly 15% is allowed. A forecast below 15% warns before activation; the forecast is an estimate, not a guarantee.
+- When a timer completes, the main window shows “Timer finished at” followed by its finish date, time, and timezone, using your Mac’s current region and timezone settings. The recorded instant stays fixed when the window is reopened or refreshed. Starting another timer clears it; it is not saved across app relaunches.
 - Stopping releases Cat Run's sleep prevention. macOS and other apps decide when the computer actually sleeps. The app does not force an immediate sleep.
 - Closing the window leaves an active timer running. Quitting ends it. Saved preferences and recent durations survive relaunch; a timer does not resume automatically.
 - The window uses a fixed black background with peach (`#FBC193`) text and outlines, and no scrolling. Text keeps the same color and brightness when controls are disabled. Verdana is used for controls; the Cat Run wordmark uses a script face. The header uses the same sitting cat artwork as the idle menu-bar icon. Settings and Back lettering is centered inside its button. The duration slider has a rounded track and thumb centered between its minus and plus buttons. Hovering over the lock beside Keep Mac awake shows “Keeps your Mac awake whenever you start a timer.” above the icon. The duration value uses the same 15pt Verdana text size as its label. Start and Stop occupy exactly the same space in every timer state.
@@ -24,6 +25,8 @@ The cat's 340 raster frames are cached for reuse. Images combining the cat with 
 Cat Run prevents **idle** sleep using macOS power assertions. It does not override choosing Sleep, closing a laptop's lid, a shutdown, or macOS safety decisions. It cannot guarantee that a background task continues through those events. Screen lock and display sleep are separate macOS behaviors; Cat Run does not bypass a locked session.
 
 The minimum content size is 420×400 points; the title bar adds the height required by macOS. The initial window grows by up to 15% on larger logical displays. Resizing preserves the complete window's aspect ratio, including the title bar. Its maximum width and height are each 25% above that display's default size, or less if needed to fit the display's usable area. On an unusually small logical display that cannot contain the minimum, the usable minimum takes priority. Resizing does not change font sizes or add scrolling. Main controls, notices, and the Start/Stop button retain their assigned positions when the timer starts or stops.
+
+The [product requirements](PRD.md) describe the app’s behavior and completion-time acceptance criteria.
 
 ## Build and test
 

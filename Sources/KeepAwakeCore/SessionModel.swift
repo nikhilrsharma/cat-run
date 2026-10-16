@@ -65,7 +65,8 @@ public enum SessionPreparation: Equatable {
     case blocked(StartBlockReason)
 }
 
-/// Pure session state. Callers supply a continuous monotonic clock that includes system sleep.
+/// Session state driven by a continuous monotonic clock that includes system sleep.
+/// Wall time is used only to label a completed timer, never to control its duration.
 public struct SessionModel {
     public static let minimumBatteryPercent = 15.0
     public static let maximumSessionSeconds: TimeInterval = 6 * 60 * 60
@@ -75,6 +76,7 @@ public struct SessionModel {
     public private(set) var preferences: Preferences
     public private(set) var active = false
     public private(set) var stopReason: SessionStopReason?
+    public private(set) var finishedAt: Date?
     public private(set) var totalDurationSeconds: TimeInterval = 0
 
     private let owner = UUID()
@@ -212,13 +214,14 @@ public struct SessionModel {
         }
         lastObservedNow = max(lastObservedNow, now)
         stopReason = nil
+        finishedAt = nil
         revision &+= 1
         return true
     }
 
     /// Returns true if the call stopped the session. Normal countdown changes need no mutation notice.
     @discardableResult
-    public mutating func advance(now: TimeInterval, battery: BatteryReading) -> Bool {
+    public mutating func advance(now: TimeInterval, battery: BatteryReading, wallNow: Date = Date()) -> Bool {
         let batteryBlock = Self.batteryBlock(battery)
         let clockValid = now.isFinite && now >= 0
         guard active else {
@@ -232,7 +235,13 @@ public struct SessionModel {
         }
         guard clockValid else { return stop(reason: .clockUnavailable) }
         lastObservedNow = max(lastObservedNow, now)
-        if remaining(at: now) == 0 { return stop(reason: .expired) }
+        if remaining(at: now) == 0 {
+            // Preserve the deadline's instant even if the run loop delivers this callback late.
+            let completion = wallNow.addingTimeInterval(deadline - now)
+            let stopped = stop(reason: .expired)
+            finishedAt = completion
+            return stopped
+        }
         return false
     }
 
@@ -243,6 +252,7 @@ public struct SessionModel {
         totalDurationSeconds = 0
         deadline = 0
         stopReason = reason
+        finishedAt = nil
         revision &+= 1
         return true
     }

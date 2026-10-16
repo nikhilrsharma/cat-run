@@ -1,8 +1,17 @@
-# Cat Run 0.1.9 validation
+# Cat Run 0.1.10 validation
 
-Checked October 13, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
+Checked October 16, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Natural completion now records the timer deadline once and displays its date, time, and timezone using the Mac’s current regional settings. Locale and timezone notifications refresh its presentation without changing the stored instant. The countdown still uses the monotonic clock.
+- All 110 tests passed: 69 native and 41 core tests. Nine new tests cover exact and delayed expiry, stable completion timestamps, failed and successful starts, extensions, non-expiry stops, timezone date rollover, the repeated daylight-saving hour, and 12/24-hour formatting. The existing layout matrix now includes completed notices for five locale/timezone combinations at all tested window sizes.
+- An isolated native rendering harness used the production model, formatter, and window to simulate expiry and render the minimum 420×400-point content area. Visual inspection confirmed that the complete local date/time notice fits without overlap or scrolling. This is simulated expiry; a live 15-minute session was not run for this revision.
+- Version 0.1.10/build 11 was installed and passed strict signature verification with only the App Sandbox entitlement. Native checks confirmed the version and preserved the 165-minute selection, recent values of 165, 90, and 60 minutes, screen awake on, launch at login off, and inactive timer.
+- The extracted app archive passed strict signature verification and matched the built and installed app files byte for byte. All 42 publication files passed the source privacy scan.
+- Added PRD.md beside the source and updated the README with the completion-time requirements. The earlier installed app was archived before replacement.
+
+## Checks retained from 0.1.9
 
 - Added the Caffeine attribution to About and the README. All 16 existing layout tests passed; the full behavior suite was not rerun for this text/layout change.
 - Version 0.1.9/build 10 was built, installed, and passed strict signature verification. A native Settings screenshot confirmed the attribution fits with the creator, version, and licence text.

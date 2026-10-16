@@ -50,6 +50,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.stop(.systemSleep) })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshBattery() })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshBattery() })
+        observers.append(NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in self?.render() })
+        observers.append(NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.render() })
         render()
         // Login launches stay in the menu bar; opening the app directly shows the window.
         let isLoginLaunch = NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
@@ -157,7 +159,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         if !reading.hasBattery { view.battery = "Connected to power" }
         else if let percent = reading.validPercent { view.battery = "Battery \(Int(floor(percent)))%" + (reading.onAC ? " · Plugged in" : "") }
         else { view.battery = "Battery reading unavailable" }
-        view.notice = !transientNotice.isEmpty ? transientNotice : (!persistentNotice.isEmpty ? persistentNotice : model.stopReason?.message ?? "")
+        view.notice = !transientNotice.isEmpty ? transientNotice : (!persistentNotice.isEmpty ? persistentNotice : SessionNotice.message(for: model.stopReason, finishedAt: model.finishedAt))
         if !model.active, reading.hasBattery, let percent = reading.validPercent, percent < 15, view.notice.isEmpty { view.notice = StartBlockReason.lowBattery.message }
         let loginStatus = login.status
         view.loginEnabled = loginStatus == .enabled || loginStatus == .requiresApproval
