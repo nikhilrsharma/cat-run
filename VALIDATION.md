@@ -10,6 +10,8 @@ Checked October 16, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build
 
 - Version 0.2.1/build 13 was packaged with the same App Sandbox-only entitlement and hardened runtime. The extracted app archive passed strict signature verification and matched the build byte for byte. All 49 publication files passed the privacy scan; the stripped executable contained no personal home path.
 
+- Installed 0.2.1 only after the existing 15-minute session finished naturally. The prior app was backed up; the installed bundle passed strict signature verification and matched the build byte for byte. Native inspection confirmed the complete left-end thumb, unchanged 15-minute selection and 15/165/90-minute history, screen-awake preference, inactive state, and the same completed-session timestamp after reopening.
+
 ## Checks retained from 0.2.0
 
 - Fixed the reported 90%-charge/15-minute warning: an unavailable runtime estimate is no longer classified as a low-battery forecast. Regression tests cover wake/unplug settling, AC transitions, missing and unstable runtime, charge validity, and the exact 15% boundary.
