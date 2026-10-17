@@ -1,8 +1,16 @@
-# Cat Run 0.2.0 validation
+# Cat Run 0.2.1 validation
 
 Checked October 16, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Corrected slider endpoint clipping by calculating the track and circular thumb from the control's bounds with three points of outer clearance. The drawing path uses that same thumb rectangle rather than the inherited cached rectangle. Native keyboard/accessibility and 24 duration tick values remain in place.
+- All 18 focused native tests passed: the 17 existing window/layout tests plus a rendered-slider regression. The new test captures the actual slider view at minimum, middle, and maximum durations, enabled and disabled, at minimum/maximum window sizes and 1×/2× rendering (24 bitmap cases). It checks complete thumb dimensions/area and outer-edge clearance. The prior implementation failed the endpoint-clearance checks; the corrected implementation passed. The unrelated session/core suite was not rerun for this drawing-only patch.
+- An isolated native preview using the production window and slider confirmed complete circular thumbs at both ends in active and inactive appearances. Pointer drags from 15 minutes to six hours and back reached the correct values. The preview did not hold power assertions or modify the running app's timer, history, or preferences.
+
+- Version 0.2.1/build 13 was packaged with the same App Sandbox-only entitlement and hardened runtime. The extracted app archive passed strict signature verification and matched the build byte for byte. All 49 publication files passed the privacy scan; the stripped executable contained no personal home path.
+
+## Checks retained from 0.2.0
 
 - Fixed the reported 90%-charge/15-minute warning: an unavailable runtime estimate is no longer classified as a low-battery forecast. Regression tests cover wake/unplug settling, AC transitions, missing and unstable runtime, charge validity, and the exact 15% boundary.
 - All 189 tests passed: 107 native and 82 core tests. The native suite includes 37 safety-guard tests; the core suite includes 15 forecast and 19 journal tests. New message/layout coverage exercises 66 persisted or failure notices across five locale/timezone combinations and three simulated display sizes at their minimum and maximum window sizes (396 layout cases), in addition to the retained layout checks.

@@ -1,6 +1,6 @@
 # Cat Run product requirements
 
-Version 0.2.0 · Updated October 16, 2026
+Version 0.2.1 · Updated October 16, 2026
 
 Cat Run is a small native macOS utility for keeping a Mac awake for a chosen duration. It is created by Nikhil Sharma with assistance from OpenAI’s ChatGPT models, inspired by Caffeine by Dominic Rodemer, and published as open source under the MIT licence.
 
@@ -36,7 +36,7 @@ Cat Run is a small native macOS utility for keeping a Mac awake for a chosen dur
 ## Interface and menu bar
 
 - Use a black background with peach `#FBC193` text and outlines. Keep text equally bright for enabled and disabled controls. Use Verdana for controls and a script wordmark, with the same sitting cat as the idle menu-bar icon.
-- Align the wordmark, cat, and navigation button at the bottom. Center Settings and Back labels within their buttons. Use a rounded duration slider with a centered thumb, without a duplicate duration dropdown.
+- Align the wordmark, cat, and navigation button at the bottom. Center Settings and Back labels within their buttons. Use a rounded duration slider with a centered thumb, without a duplicate duration dropdown. Reserve enough clearance at both endpoints for the complete circular thumb, outline, and shadow in active and inactive states.
 - Keep the interface free of scrollbars. The minimum content area is 420 × 400 points. Choose the default size for the display; preserve the complete window’s aspect ratio when resizing, up to 25% above its default width and height while fitting the usable display. Hide and disable the green zoom control.
 - Show a static cat in the menu bar while inactive. While active, choose from [20 actions](CAT-ACTIONS.md) every five seconds without immediately repeating an action; show two-digit hours above minutes beside the cat. Left-click opens the app. Right-click offers only Open and Quit.
 - Reduce animation work in Low Power Mode and suppress motion for Reduce Motion, sleeping displays, or serious thermal pressure. Cache artwork and bound the combined cat/countdown cache.

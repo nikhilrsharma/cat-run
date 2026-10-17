@@ -140,7 +140,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         extend.onClick = { [weak self] in self?.onExtend?() }
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.1"
         let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-16"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
@@ -385,17 +385,21 @@ private final class CatCheckbox: NSButton {
 /// The same centered geometry is used for hit testing and drawing.
 final class SmoothSliderCell: NSSliderCell {
     private let thumbDiameter: CGFloat = 18
+    private let edgeClearance: CGFloat = 3
 
     override func barRect(flipped: Bool) -> NSRect {
-        let native = super.barRect(flipped: flipped)
-        let bounds = controlView?.bounds ?? native
-        return NSRect(x: native.minX, y: bounds.midY - 2, width: native.width, height: 4)
+        let bounds = controlView?.bounds ?? .zero
+        // The native cell's cached track can change during drawing. Define the
+        // travel from our view instead, reserving the complete thumb and glow.
+        let inset = thumbDiameter / 2 + edgeClearance
+        return NSRect(x: bounds.minX + inset, y: bounds.midY - 2,
+                      width: max(0, bounds.width - 2 * inset), height: 4)
     }
     override func knobRect(flipped: Bool) -> NSRect {
-        let native = super.knobRect(flipped: flipped)
-        let bounds = controlView?.bounds ?? native
-        return NSRect(x: native.midX - thumbDiameter / 2,
-                      y: bounds.midY - thumbDiameter / 2,
+        let track = barRect(flipped: flipped)
+        let fraction = maxValue > minValue ? min(1, max(0, (doubleValue - minValue) / (maxValue - minValue))) : 0
+        return NSRect(x: track.minX + CGFloat(fraction) * track.width - thumbDiameter / 2,
+                      y: track.midY - thumbDiameter / 2,
                       width: thumbDiameter, height: thumbDiameter)
     }
     override func drawBar(inside rect: NSRect, flipped: Bool) {
@@ -408,7 +412,8 @@ final class SmoothSliderCell: NSSliderCell {
         AppPalette.foreground.withAlphaComponent(isEnabled ? 0.70 : 0.32).setFill()
         NSBezierPath(roundedRect: filled, xRadius: 2, yRadius: 2).fill()
     }
-    override func drawKnob(_ knobRect: NSRect) {
+    override func drawKnob(_ rect: NSRect) {
+        let knobRect = knobRect(flipped: controlView?.isFlipped ?? false)
         NSGraphicsContext.saveGraphicsState()
         if isEnabled {
             let shadow = NSShadow()
