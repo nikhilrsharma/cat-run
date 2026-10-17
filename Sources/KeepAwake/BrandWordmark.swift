@@ -5,7 +5,9 @@ import CoreText
 final class BrandWordmark: NSView {
     private let line: CTLine
     private let glyphBounds: CGRect
-    var inkBounds: NSRect { NSRect(origin: .zero, size: glyphBounds.size) }
+    // Raster antialiasing extends beyond Core Text's ideal glyph-path bounds.
+    let drawingPadding: CGFloat = 1
+    var inkBounds: NSRect { NSRect(x: drawingPadding, y: drawingPadding, width: glyphBounds.width, height: glyphBounds.height) }
 
     override init(frame frameRect: NSRect) {
         let font = NSFont(name: "SnellRoundhand-Bold", size: 26)
@@ -24,7 +26,7 @@ final class BrandWordmark: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.saveGState()
         context.textMatrix = .identity
-        context.textPosition = CGPoint(x: -glyphBounds.minX, y: -glyphBounds.minY)
+        context.textPosition = CGPoint(x: inkBounds.minX - glyphBounds.minX, y: inkBounds.minY - glyphBounds.minY)
         CTLineDraw(line, context)
         context.restoreGState()
     }

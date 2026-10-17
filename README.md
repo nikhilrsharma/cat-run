@@ -4,7 +4,7 @@ A small native macOS menu bar utility that keeps a Mac awake for a chosen time. 
 
 Inspired by Caffeine by Dominic Rodemer.
 
-Version 0.2.1 fixes the duration slider thumb being clipped at either endpoint. Its full circle and shadow stay inside the control in both active and inactive states.
+Version 0.2.2 fixes subtle clipping of the script wordmark's outer edges while preserving its alignment with the cat and Settings/Back button. The main screen, Settings, notices, hover hint, and battery warning were checked at the minimum and maximum window sizes. Version 0.2.1 also fixed the duration slider thumb at either endpoint; its full circle and shadow stay inside the control in active and inactive states.
 
 Version 0.2.0 improves battery forecasting and recovery from sleep, app stalls, and interrupted sessions. An earlier “Battery warning” could appear at 90% charge because macOS had not supplied a remaining-runtime estimate after unplugging. That meant the estimate was **unknown**, not that the battery was predicted to fall below 15%. An unavailable forecast no longer prompts a warning or requires confirmation.
 

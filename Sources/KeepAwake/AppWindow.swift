@@ -140,7 +140,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         extend.onClick = { [weak self] in self?.onExtend?() }
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.1"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.2"
         let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-16"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
@@ -150,12 +150,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private func layoutContent() {
         let w = root.bounds.width, h = root.bounds.height, inset: CGFloat = 24
         let available = w - inset * 2
-        brand.frame = NSRect(x: inset, y: 9, width: max(98, ceil(brand.inkBounds.width)), height: 35)
+        let brandPadding = brand.drawingPadding
+        brand.frame = NSRect(x: inset - brandPadding, y: 9 - brandPadding,
+                            width: max(98, ceil(brand.inkBounds.width)) + brandPadding * 2,
+                            height: 35 + brandPadding * 2)
         let catHeight: CGFloat = 28
         let ratio = (cat.image?.size.width ?? 1) / max(1, cat.image?.size.height ?? 1)
-        cat.frame = NSRect(x: brand.frame.maxX + 10, y: brand.frame.maxY - catHeight, width: catHeight * ratio, height: catHeight)
         // Align the button's outer bottom with the wordmark and paws; center its title inside.
         let headerBottom = brand.convert(brand.inkBounds, to: root).maxY
+        cat.frame = NSRect(x: brand.frame.maxX - brandPadding + 10, y: headerBottom - catHeight,
+                          width: catHeight * ratio, height: catHeight)
         navigation.frame = NSRect(x: w - inset - 86, y: headerBottom - 30, width: 86, height: 30)
         main.frame = NSRect(x: inset, y: 62, width: available, height: h - 78)
         settings.frame = main.frame

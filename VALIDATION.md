@@ -1,8 +1,15 @@
-# Cat Run 0.2.1 validation
+# Cat Run 0.2.2 validation
 
 Checked October 16, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Audited main, active, Settings, warning, and hover layouts at the minimum and maximum window sizes. Found subtle clipping of the script wordmark: Core Text's ideal glyph bounds excluded antialiased pixels at its left and bottom edges. Added one point of drawing clearance while preserving the visible title position and the cat/navigation bottom alignment. No other clipping or alignment defects were found in the checked states.
+- All 193 tests passed: 111 native and 82 core. The new wordmark raster regression failed before the correction and passed afterward at both window limits and 1×/2× rendering. New text tests cover 18 locales × 12 months × two outcome messages × two sizes (864 cases), plus all login statuses, failed enable/disable requests, and active/inactive Settings states at both sizes. Retained tests cover the slider, menu-bar cat/countdown, checkbox boundaries, button centering, header alignment, all 24 durations, and window sizing.
+- Visually reviewed 32 full-window renders (16 states at both minimum and maximum sizes), plus two battery-warning panels. Coverage includes first launch, one/two/three recent durations, long duration labels, active timers, extension disabled, completion/interruption/low-charge/unavailable-charge/forecast notices, idle/active lock hints, and clean/approval/failure/active Settings. The largest supported scale was exercised using a simulated 1728×1080-point display. These are renders of production AppKit views with controlled state, not measurements on multiple physical monitors or real battery events.
+- Version 0.2.2/build 14 was packaged with App Sandbox as its only entitlement and hardened runtime enabled. The extracted archive passed strict signature verification and all four bundle files matched the build byte for byte. All 51 publication files passed the privacy scan; the stripped executable contained no personal home path. Installation was held while the user's existing timer remained active.
+
+## Checks retained from 0.2.1
 
 - Corrected slider endpoint clipping by calculating the track and circular thumb from the control's bounds with three points of outer clearance. The drawing path uses that same thumb rectangle rather than the inherited cached rectangle. Native keyboard/accessibility and 24 duration tick values remain in place.
 - All 18 focused native tests passed: the 17 existing window/layout tests plus a rendered-slider regression. The new test captures the actual slider view at minimum, middle, and maximum durations, enabled and disabled, at minimum/maximum window sizes and 1×/2× rendering (24 bitmap cases). It checks complete thumb dimensions/area and outer-edge clearance. The prior implementation failed the endpoint-clearance checks; the corrected implementation passed. The unrelated session/core suite was not rerun for this drawing-only patch.
