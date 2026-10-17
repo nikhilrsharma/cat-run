@@ -4,19 +4,29 @@ A small native macOS menu bar utility that keeps a Mac awake for a chosen time. 
 
 Inspired by Caffeine by Dominic Rodemer.
 
+Version 0.2.0 improves battery forecasting and recovery from sleep, app stalls, and interrupted sessions. An earlier “Battery warning” could appear at 90% charge because macOS had not supplied a remaining-runtime estimate after unplugging. That meant the estimate was **unknown**, not that the battery was predicted to fall below 15%. An unavailable forecast no longer prompts a warning or requires confirmation.
+
 ## Behavior
 
 - Choose 15 minutes to 6 hours in 15-minute increments. Hours and minutes use two-digit values, such as `15m` and `01h 15m`; hours are omitted below one hour. The countdown uses the same notation, such as `03m` or `01h 03m`. The three most recently started, distinct durations are saved for quick reuse.
 - Keep Mac awake is required during a timer. Keeping the display awake is optional. That choice and start at login can be changed only while the timer is inactive.
 - A static menu bar cat becomes periodically animated during a timer. A small two-line countdown shows two-digit hours above minutes beside the cat, for example `01` above `03`. Click to open the window; right-click for Open and Quit.
-- Below 15% battery, a timer cannot start and an active timer stops, including while connected to power. Exactly 15% is allowed. A forecast below 15% warns before activation; the forecast is an estimate, not a guarantee.
-- When a timer completes, the main window shows “Timer finished at” followed by its finish date, time, and timezone, using your Mac’s current region and timezone settings. The recorded instant stays fixed when the window is reopened or refreshed. Starting another timer clears it; it is not saved across app relaunches.
+- Below 15% battery, a timer cannot start and an active timer stops, including while connected to power. Exactly 15% is allowed. An unavailable charge reading blocks or stops a timer on a battery-equipped Mac. Missing runtime estimates are different: a valid charge reading remains usable without a forecast.
+- A settled forecast below 15% warns before activation or extension. If a low projection becomes available during a running timer, including after unplugging, a short notice appears in the existing window without opening a confirmation dialog. Predictions never replace the actual-charge cutoff or guarantee a duration.
+- When a timer completes, the main window shows “Timer finished at” followed by its finish date, time, and timezone, using your Mac’s current region and timezone settings. The recorded instant stays fixed when the window is reopened or refreshed. The most recent session outcome now survives app relaunch; starting another timer replaces it.
+- Sleep, user switching, logout, shutdown, and detected app stalls stop the timer. Wake and relaunch always leave it inactive. Known stops retain their reason and observed time; an unfinished record after a crash or forced termination shows “Previous timer interrupted. Stop time unknown.”
 - Stopping releases Cat Run's sleep prevention. macOS and other apps decide when the computer actually sleeps. The app does not force an immediate sleep.
 - Closing the window leaves an active timer running. Quitting ends it. Saved preferences and recent durations survive relaunch; a timer does not resume automatically.
 - The window uses a fixed black background with peach (`#FBC193`) text and outlines, and no scrolling. Text keeps the same color and brightness when controls are disabled. Verdana is used for controls; the Cat Run wordmark uses a script face. The header uses the same sitting cat artwork as the idle menu-bar icon. Settings and Back lettering is centered inside its button. The duration slider has a rounded track and thumb centered between its minus and plus buttons. Hovering over the lock beside Keep Mac awake shows “Keeps your Mac awake whenever you start a timer.” above the icon. The duration value uses the same 15pt Verdana text size as its label. Start and Stop occupy exactly the same space in every timer state.
 - No session notifications, telemetry, accounts, ads, or cloud service.
 
-Battery monitoring responds to macOS power-source notifications, refreshes at launch, activation, and wake, and uses a 60-second fallback check only during an active timer. The fallback has a five-second scheduling tolerance so macOS can combine wakeups. There is no idle polling. Readings are limited by when macOS reports a change; this is not a real-time guarantee.
+Battery monitoring responds to macOS power-source notifications and refreshes at launch, activation, and wake. A separate safety queue checks current charge every 10 seconds while a timer runs, with up to one second of scheduling tolerance. It checks independently of the interface and performs no periodic work while idle. Readings still depend on macOS reporting and scheduling; the cutoff is not an instantaneous or battery-drain guarantee.
+
+Forecasts use only macOS's current internal-battery runtime estimate after at least 30 seconds of stable on-battery observations. Wake, connecting power, missing or invalid estimates, large estimate changes, and observation gaps over two minutes reset that settling period. Charge readings remain available immediately. Cat Run does not invent a runtime from the charge percentage or reuse an old runtime when the new one is missing.
+
+The safety queue renews power assertions for at most 45 seconds at a time, bounded by the session deadline. It checks whether the interface has answered within 30 seconds and stops an unresponsive session when the guard next runs. If the guard itself stalls, macOS's assertion timeout limits the last issued keep-awake request. These are layered safeguards subject to operating-system behavior, not a promise to prevent every kind of battery drain or system failure.
+
+Sleep notifications cancel the timer, with a wake fallback and a comparison of continuous time against awake time to detect a missed sleep notification. A deadline reached while awake is recorded as completion before evaluating a battery reading first observed afterward. Evidence of sleep takes priority over labeling a session complete. Once stopped, late callbacks cannot resume it or alter a newer session.
 
 The countdown uses a continuous monotonic clock, with an operating-system timeout on its power assertions. The menu bar cat has [20 original activities](CAT-ACTIONS.md). A randomly chosen activity lasts about two seconds and starts every five seconds while active, without immediately repeating the previous choice. Low Power Mode reduces the animation to two frames per second. Reduce Motion, a sleeping display, or serious thermal pressure suppresses movement; the active pose remains distinct from idle. Swift and native macOS frameworks avoid a browser or an additional language runtime.
 
@@ -26,7 +36,7 @@ Cat Run prevents **idle** sleep using macOS power assertions. It does not overri
 
 The minimum content size is 420×400 points; the title bar adds the height required by macOS. The initial window grows by up to 15% on larger logical displays. Resizing preserves the complete window's aspect ratio, including the title bar. Its maximum width and height are each 25% above that display's default size, or less if needed to fit the display's usable area. On an unusually small logical display that cannot contain the minimum, the usable minimum takes priority. Resizing does not change font sizes or add scrolling. Main controls, notices, and the Start/Stop button retain their assigned positions when the timer starts or stops.
 
-The [product requirements](PRD.md) describe the app’s behavior and completion-time acceptance criteria.
+The [product requirements](PRD.md) include the full interruption-scenario table and distinguish automated policy coverage from remaining hardware checks. [VALIDATION.md](VALIDATION.md) records checks actually performed.
 
 ## Build and test
 

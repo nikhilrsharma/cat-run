@@ -2,6 +2,7 @@ import Foundation
 
 public enum SessionStopReason: String, Codable, Equatable {
     case manual, expired, lowBattery, batteryUnavailable, clockUnavailable, assertionFailure, systemSleep, quit
+    case unresponsive, sessionInactive, shutdown, interrupted, storageFailure
 
     public var message: String {
         switch self {
@@ -13,6 +14,11 @@ public enum SessionStopReason: String, Codable, Equatable {
         case .assertionFailure: return "Stopped: the keep-awake request failed. You can try again."
         case .systemSleep: return "Stopped when your Mac went to sleep. Start a new timer when ready."
         case .quit: return "Timer stopped when Cat Run quit."
+        case .unresponsive: return "Stopped because Cat Run stopped responding."
+        case .sessionInactive: return "Stopped when you switched users."
+        case .shutdown: return "Stopped for logout or shutdown."
+        case .interrupted: return "Previous timer interrupted. Stop time unknown."
+        case .storageFailure: return "Stopped: session status could not be saved."
         }
     }
 }
@@ -35,14 +41,11 @@ public enum StartBlockReason: Equatable {
 
 public enum ForecastWarning: Equatable {
     case estimatedBelowMinimum(projectedPercent: Double)
-    case estimateUnavailable
 
     public var message: String {
         switch self {
         case .estimatedBelowMinimum(let percent):
             return "Battery may fall below 15% during this timer (approximately \(Int(floor(percent)))% remaining at the end). The timer will stop if actual charge falls below 15%, even while plugged in."
-        case .estimateUnavailable:
-            return "Battery charge at the end cannot currently be estimated. The timer will stop if actual charge falls below 15%, even while plugged in."
         }
     }
 }
@@ -77,6 +80,7 @@ public struct SessionModel {
     public private(set) var active = false
     public private(set) var stopReason: SessionStopReason?
     public private(set) var finishedAt: Date?
+    public private(set) var stoppedAt: Date?
     public private(set) var totalDurationSeconds: TimeInterval = 0
 
     private let owner = UUID()
@@ -215,6 +219,7 @@ public struct SessionModel {
         lastObservedNow = max(lastObservedNow, now)
         stopReason = nil
         finishedAt = nil
+        stoppedAt = nil
         revision &+= 1
         return true
     }
@@ -230,29 +235,28 @@ public struct SessionModel {
             if batteryBlock != nil || !clockValid { revision &+= 1 }
             return false
         }
-        if let reason = batteryBlock {
-            return stop(reason: reason == .lowBattery ? .lowBattery : .batteryUnavailable)
-        }
-        guard clockValid else { return stop(reason: .clockUnavailable) }
+        guard clockValid else { return stop(reason: .clockUnavailable, at: wallNow) }
         lastObservedNow = max(lastObservedNow, now)
         if remaining(at: now) == 0 {
             // Preserve the deadline's instant even if the run loop delivers this callback late.
             let completion = wallNow.addingTimeInterval(deadline - now)
-            let stopped = stop(reason: .expired)
-            finishedAt = completion
-            return stopped
+            return stop(reason: .expired, at: completion)
+        }
+        if let reason = batteryBlock {
+            return stop(reason: reason == .lowBattery ? .lowBattery : .batteryUnavailable, at: wallNow)
         }
         return false
     }
 
     @discardableResult
-    public mutating func stop(reason: SessionStopReason = .manual) -> Bool {
+    public mutating func stop(reason: SessionStopReason = .manual, at date: Date? = nil) -> Bool {
         guard active else { return false }
         active = false
         totalDurationSeconds = 0
         deadline = 0
         stopReason = reason
-        finishedAt = nil
+        finishedAt = reason == .expired ? date : nil
+        stoppedAt = date
         revision &+= 1
         return true
     }
@@ -266,7 +270,7 @@ public struct SessionModel {
     public static func forecastWarning(battery: BatteryReading, seconds: TimeInterval) -> ForecastWarning? {
         guard battery.hasBattery, !battery.onAC else { return nil }
         guard let percent = battery.validPercent,
-              let runtime = battery.validMinutesToEmpty else { return .estimateUnavailable }
+              let runtime = battery.validMinutesToEmpty else { return nil }
         let projected = max(0, percent * (1 - seconds / (runtime * 60 * forecastRuntimeAllowance)))
         return projected < minimumBatteryPercent ? .estimatedBelowMinimum(projectedPercent: projected) : nil
     }

@@ -173,14 +173,11 @@ final class SessionModelTests: XCTestCase {
         XCTAssertEqual(model.remaining(at: 111), 3_600)
     }
 
-    func testUnknownForecastCanBeConfirmedButActualProtectionRemains() throws {
+    func testUnknownForecastDoesNotWarnButActualProtectionRemains() throws {
         for runtime in [nil, 0, -1, Double.nan, Double.infinity] as [Double?] {
             var model = SessionModel()
             let noForecast = BatteryReading(hasBattery: true, percent: 75, onAC: false, minutesToEmpty: runtime)
-            guard case .warning(_, .estimateUnavailable) = model.prepareStart(durationMinutes: 30, battery: noForecast, now: 100) else {
-                return XCTFail("Expected unavailable forecast warning")
-            }
-            let plan = try ready(model.prepareStart(durationMinutes: 30, battery: noForecast, now: 100, confirmRisk: true))
+            let plan = try ready(model.prepareStart(durationMinutes: 30, battery: noForecast, now: 100))
             XCTAssertTrue(model.commit(plan, now: 100))
             XCTAssertTrue(model.advance(now: 200, battery: BatteryReading(hasBattery: true, percent: 14, onAC: true)))
         }

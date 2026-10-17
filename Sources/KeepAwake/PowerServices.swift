@@ -9,9 +9,8 @@ import KeepAwakeCore
 final class BatteryMonitor {
     var onChange: ((BatteryReading) -> Void)?
 
-    private enum HardwareKind { case unknown, portable, desktop }
-    private var hardwareKind: HardwareKind = .unknown
-    private var hasSeenInternalBattery = false
+    private let reader = BatteryReader()
+    private var forecast = BatteryForecastTracker()
     private var runLoopSource: CFRunLoopSource?
     private var wakeObserver: NSObjectProtocol?
     private var started = false
@@ -37,6 +36,7 @@ final class BatteryMonitor {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            self?.forecast.reset()
             self?.publishReading()
         }
         publishReading()
@@ -47,10 +47,43 @@ final class BatteryMonitor {
         removeObservers()
     }
 
-    /// A synchronous fresh snapshot; the caller decides how to apply it.
+    /// A synchronous fresh charge snapshot; only forecast runtime is filtered.
     @discardableResult
     func refresh() -> BatteryReading {
         precondition(Thread.isMainThread)
+        return forecast.observe(reader.read(), at: SessionSafetyClock.read().continuous)
+    }
+
+    private func publishReading() {
+        precondition(Thread.isMainThread)
+        guard started else { return }
+        onChange?(refresh())
+    }
+
+    private func removeObservers() {
+        started = false
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            CFRunLoopSourceInvalidate(runLoopSource)
+            self.runLoopSource = nil
+        }
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
+    }
+
+    deinit { removeObservers() }
+}
+
+/// Each reader belongs to one serial execution context. UI and safety checks use
+/// separate readers so a stalled main thread cannot delay fresh safety readings.
+final class BatteryReader {
+    private enum HardwareKind { case unknown, portable, desktop }
+    private var hardwareKind: HardwareKind = .unknown
+    private var hasSeenInternalBattery = false
+
+    func read() -> BatteryReading {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sourceList = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
         else {
@@ -127,12 +160,6 @@ final class BatteryMonitor {
         BatteryReading(hasBattery: true, percent: nil, onAC: onAC, minutesToEmpty: nil)
     }
 
-    private func publishReading() {
-        precondition(Thread.isMainThread)
-        guard started else { return }
-        onChange?(refresh())
-    }
-
     private func readHardwareKind() -> HardwareKind {
         // The public IOPM.h contract says an absent clamshell-state property means
         // this hardware has no clamshell. A failed registry read remains unknown.
@@ -147,20 +174,6 @@ final class BatteryMonitor {
         return properties[kAppleClamshellStateKey] == nil ? .desktop : .portable
     }
 
-    private func removeObservers() {
-        started = false
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-            CFRunLoopSourceInvalidate(runLoopSource)
-            self.runLoopSource = nil
-        }
-        if let wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
-            self.wakeObserver = nil
-        }
-    }
-
-    deinit { removeObservers() }
 }
 
 enum PowerServiceError: LocalizedError {
@@ -181,13 +194,13 @@ enum PowerServiceError: LocalizedError {
 }
 
 /// Uses separate idle-system and idle-display assertions with OS-enforced expiry.
+/// Its owning SessionSafetyGuard serial queue must serialize every call.
 final class PowerAssertionManager {
     private var systemAssertion: IOPMAssertionID?
     private var displayAssertion: IOPMAssertionID?
     private var keepsScreenAwake = false
 
     func acquire(keepScreenAwake: Bool, timeout: TimeInterval) throws {
-        precondition(Thread.isMainThread)
         guard timeout.isFinite, timeout > 0 else { throw PowerServiceError.invalidDuration }
 
         var newSystem: IOPMAssertionID?
@@ -214,14 +227,12 @@ final class PowerAssertionManager {
     }
 
     func updateTimeout(seconds: TimeInterval) throws {
-        precondition(Thread.isMainThread)
         guard systemAssertion != nil else { throw PowerServiceError.noActiveSession }
         // Replacing the pair atomically avoids partially extending one assertion.
         try acquire(keepScreenAwake: keepsScreenAwake, timeout: seconds)
     }
 
     func release() {
-        precondition(Thread.isMainThread)
         releaseAssertion(displayAssertion)
         releaseAssertion(systemAssertion)
         displayAssertion = nil

@@ -21,6 +21,33 @@ final class AppWindowLayoutTests: XCTestCase {
         }
     }
 
+    func testPersistedSessionOutcomesFitAtBothSizeLimitsAcrossLocales() throws {
+        let notices = try persistedSessionNotices()
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let root = try XCTUnwrap(controller.window?.contentView)
+            let label = try XCTUnwrap(descendants(root).compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "notice"
+            })
+            for screen in screenFrames {
+                for sizeChoice in [0.0, 1.0] {
+                    for (context, message) in notices {
+                        var state = WindowState()
+                        state.duration = 360
+                        state.recent = [360, 345, 330]
+                        state.battery = "Battery 90% · Plugged in"
+                        state.notice = message
+                        controller.render(state)
+                        resize(controller, screen: screen, fraction: sizeChoice)
+                        XCTAssertEqual(label.stringValue, message, "Stop explanation must not be truncated or substituted")
+                        try assertControlsFit(controller, context: "\(context), screen \(screen.size), size \(sizeChoice)")
+                    }
+                }
+            }
+        }
+    }
+
     func testSettingsFitAtBothWindowLimits() throws {
         try onMain {
             let controller = makeWindow()
@@ -402,7 +429,7 @@ final class AppWindowLayoutTests: XCTestCase {
             defer { controller.close() }
             let messages = [
                 ForecastWarning.estimatedBelowMinimum(projectedPercent: 14).message,
-                ForecastWarning.estimateUnavailable.message
+                ForecastWarning.estimatedBelowMinimum(projectedPercent: 0).message
             ]
             for message in messages {
                 let panel = controller.makeWarningPanel(message)
@@ -423,6 +450,51 @@ final class AppWindowLayoutTests: XCTestCase {
         [NSRect(x: 0, y: 25, width: 1440, height: 875),
          NSRect(x: -1024, y: 25, width: 1024, height: 700),
          NSRect(x: 0, y: 25, width: 800, height: 600)]
+    }
+
+    private func persistedSessionNotices() throws -> [(String, String)] {
+        let reasons: [SessionStopReason] = [
+            .manual, .expired, .lowBattery, .batteryUnavailable, .clockUnavailable,
+            .assertionFailure, .systemSleep, .quit, .unresponsive, .sessionInactive,
+            .shutdown, .interrupted, .storageFailure
+        ]
+        let locales = [
+            ("en_US", "America/Toronto"), ("en_GB", "Europe/London"),
+            ("de_DE", "Europe/Berlin"), ("fr_FR", "Asia/Kolkata"),
+            ("en_NZ", "Pacific/Chatham")
+        ]
+        let end = Date(timeIntervalSince1970: 1_792_110_600)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        var notices: [(String, String)] = []
+        for reason in reasons {
+            var value: [String: Any] = [
+                "version": 1, "id": UUID().uuidString,
+                "startedAt": end.addingTimeInterval(-900).timeIntervalSince1970,
+                "state": "finished", "reason": reason.rawValue
+            ]
+            if reason == .interrupted {
+                let withoutEnd = try decoder.decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+                notices.append(("\(reason.rawValue), unknown end", SessionNotice.message(for: withoutEnd)))
+                continue
+            }
+            value["endedAt"] = end.timeIntervalSince1970
+            let withEnd = try decoder.decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            for (locale, zone) in locales {
+                let text = SessionNotice.message(for: withEnd, locale: Locale(identifier: locale),
+                                                 timeZone: try XCTUnwrap(TimeZone(identifier: zone)))
+                notices.append(("\(reason.rawValue), \(locale), \(zone)", text))
+            }
+        }
+        // A corrupt journal or failed disk write must also fit its actionable explanation.
+        for message in ["Previous timer status unavailable. Start a new timer.",
+                        "Session status could not be read. Try again.",
+                        "Timer stopped; its status could not be saved.",
+                        "Could not safely start the timer. Please try again.",
+                        "Could not extend the timer. The original timer is still running."] {
+            notices.append(("session storage or start failure", message))
+        }
+        return notices
     }
 
     private var mainStates: [WindowState] {
