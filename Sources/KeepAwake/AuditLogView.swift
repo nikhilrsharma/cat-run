@@ -8,7 +8,6 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         case event(AuditEvent)
     }
     private let heading = AuditLogView.label("Activity", size: 15)
-    private let zone = AuditLogView.label("Local time", size: 13)
     private let empty = AuditLogView.label("No activity logged yet.", size: 13)
     private let scroll = NSScrollView()
     private let table = NSTableView()
@@ -22,8 +21,6 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         heading.identifier = NSUserInterfaceItemIdentifier("logs-heading")
-        zone.identifier = NSUserInterfaceItemIdentifier("logs-timezone")
-        zone.alignment = .right
         empty.identifier = NSUserInterfaceItemIdentifier("logs-empty")
         scroll.identifier = NSUserInterfaceItemIdentifier("logs-scroll")
         scroll.hasVerticalScroller = true
@@ -56,7 +53,7 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         table.delegate = self
         table.dataSource = self
         scroll.documentView = table
-        [heading, zone, scroll, empty].forEach(addSubview)
+        [heading, scroll, empty].forEach(addSubview)
         render(events: [], error: nil)
     }
     required init?(coder: NSCoder) { fatalError("Not used") }
@@ -71,7 +68,6 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         let newContext = "\(locale.identifier)|\(timeZone.identifier)"
         let changedContext = formatContext != newContext
         formatContext = newContext
-        zone.toolTip = timeZone.identifier
         timeFormatter.locale = locale
         timeFormatter.timeZone = timeZone
         // Seconds are useful in an audit; the running countdown remains hours/minutes only.
@@ -109,8 +105,7 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
 
     override func layout() {
         super.layout()
-        heading.frame = NSRect(x: 0, y: 0, width: bounds.width / 2, height: 23)
-        zone.frame = NSRect(x: bounds.width / 2, y: 1, width: bounds.width / 2, height: 22)
+        heading.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 23)
         scroll.frame = NSRect(x: 0, y: 34, width: bounds.width, height: max(0, bounds.height - 34))
         empty.frame = NSRect(x: 0, y: 42, width: bounds.width,
                              height: max(0, bounds.height - 42))

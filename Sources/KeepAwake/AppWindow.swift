@@ -148,8 +148,8 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
         viewLogs.onClick = { [weak self] in self?.showLogs() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1"
-        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-17"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.2"
+        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-18"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
         logs.isHidden = true

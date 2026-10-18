@@ -19,9 +19,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.1</string>
+    <string>0.3.2</string>
     <key>CFBundleVersion</key>
-    <string>16</string>
+    <string>17</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -31,6 +31,6 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Nikhil Sharma. MIT License.</string>
     <key>CatRunLastUpdated</key>
-    <string>2026-10-17</string>
+    <string>2026-10-18</string>
 </dict>
 </plist>

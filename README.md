@@ -1,8 +1,10 @@
 # Cat Run
 
-A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 17, 2026.
+A small native macOS menu bar utility that keeps a Mac awake for a chosen time. Created by Nikhil Sharma with assistance from OpenAI ChatGPT models. Last updated: October 18, 2026.
 
 Inspired by Caffeine by Dominic Rodemer.
+
+Version 0.3.2 reduces periodic battery reads to a 30-second fallback while retaining immediate event-driven reads and the independent 10-second safety guard. It also simplifies the Activity header; log timestamps still use local time and show their timezone. This reduces battery-query work, but any energy saving is expected to be modest and has not been measured.
 
 Version 0.3.1 places View logs directly beneath Back, centered on the Launch at login row, with matching button size.
 
@@ -38,7 +40,9 @@ An unavailable key or unverifiable history produces **“Logs unavailable”** r
 
 ## Power and timing
 
-Battery monitoring responds to macOS power-source notifications and refreshes at launch, activation, and wake. A separate safety queue checks current charge every 10 seconds while a timer runs, with up to one second of scheduling tolerance. It checks independently of the interface and performs no periodic work while idle. Readings still depend on macOS reporting and scheduling; the cutoff is not an instantaneous or battery-drain guarantee.
+Battery monitoring reads current charge immediately on macOS power-source notifications, at launch, on activation and wake, and before starting or extending a timer. While a timer runs, independent periodic battery reads use a 30-second fallback interval. These event-driven reads do not wait for that fallback; there is no periodic battery polling while idle. The safety guard still runs every 10 seconds, with up to one second of scheduling tolerance, to check responsiveness, sleep, the deadline, and power-assertion leases. Reducing battery-query frequency does not reduce that guard cadence.
+
+A charge change can remain undetected until macOS reports it and an event-driven or fallback read runs. The 30-second interval is a scheduling target, not a guaranteed maximum detection delay or a promise that charge cannot fall below 15%. Fewer periodic queries reduce work; any battery-life improvement is expected to be modest and has not been measured.
 
 Forecasts use only macOS's current internal-battery runtime estimate after at least 30 seconds of stable on-battery observations. Wake, connecting power, missing or invalid estimates, large estimate changes, and observation gaps over two minutes reset that settling period. Charge readings remain available immediately. Cat Run does not invent a runtime from the charge percentage or reuse an old runtime when the new one is missing.
 

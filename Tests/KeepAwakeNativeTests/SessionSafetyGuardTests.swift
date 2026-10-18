@@ -306,6 +306,212 @@ final class SessionSafetyGuardTests: XCTestCase {
         XCTAssertEqual(fixture.power.acquisitions.count, 1)
     }
 
+    func testScheduledBatteryReadsRunEveryThirtySecondsWhileLeasesRenewEveryTen() throws {
+        let fixture = Fixture()
+        try fixture.begin()
+        XCTAssertEqual(fixture.battery.reads, 1)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_030)
+        for second in stride(from: 10, through: 60, by: 10) {
+            fixture.advance(10)
+            fixture.guardService.heartbeat(token: fixture.token)
+            fixture.guardService.checkScheduled()
+            XCTAssertEqual(fixture.battery.reads, 1 + second / 30)
+            XCTAssertEqual(fixture.power.acquisitions.count, 1 + second / 10)
+            XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline,
+                           1_000 + Double(second) + 10)
+        }
+        XCTAssertEqual(fixture.guardService.stateSnapshot().token, fixture.token)
+        XCTAssertTrue(fixture.guardService.drainStopEvents().isEmpty)
+        XCTAssertTrue(fixture.power.acquisitions.allSatisfy { $0.timeout == 45 })
+    }
+
+    func testEventReadIsImmediateWithoutPostponingLeaseWorkOrDriftingBatteryDeadline() throws {
+        let fixture = Fixture()
+        try fixture.begin()
+        fixture.advance(5)
+        fixture.guardService.checkNow()
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_035)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline, 1_010)
+        XCTAssertEqual(fixture.power.acquisitions.count, 1)
+
+        for step in [5.0, 10, 10] {
+            fixture.advance(step)
+            fixture.guardService.heartbeat(token: fixture.token)
+            fixture.guardService.checkScheduled()
+            XCTAssertEqual(fixture.battery.reads, 2)
+        }
+        XCTAssertEqual(fixture.power.acquisitions.count, 4)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline, 1_035)
+
+        // The read is due five seconds after the last lease check, not at 40s.
+        fixture.advance(5)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 3)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_065)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline, 1_045)
+    }
+
+    func testExtensionImmediatelyChecksChargeBeforeNextScheduledRead() throws {
+        let fixture = Fixture()
+        try fixture.begin()
+        fixture.advance(5)
+        try fixture.guardService.extend(token: fixture.token, by: 900)
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_035)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().deadline, 2_800)
+        XCTAssertEqual(fixture.power.acquisitions.count, 2)
+
+        fixture.battery.value = BatteryReading(hasBattery: true, percent: 14, onAC: true)
+        fixture.advance(1)
+        XCTAssertThrowsError(try fixture.guardService.extend(token: fixture.token, by: 900))
+        XCTAssertEqual(fixture.battery.reads, 3)
+        XCTAssertEqual(fixture.guardService.drainStopEvents().first?.reason, .lowBattery)
+        XCTAssertEqual(fixture.power.acquisitions.count, 2)
+    }
+
+    func testScheduledReadStopsForLowOrUnavailableChargeAtNextDueTimeOnACAndBattery() throws {
+        for onAC in [false, true] {
+            for percent in [14.9, nil] as [Double?] {
+                let fixture = Fixture()
+                try fixture.begin()
+                fixture.battery.value = BatteryReading(hasBattery: true, percent: percent, onAC: onAC)
+                for _ in 0..<2 {
+                    fixture.advance(10)
+                    fixture.guardService.heartbeat(token: fixture.token)
+                    fixture.guardService.checkScheduled()
+                    XCTAssertEqual(fixture.battery.reads, 1)
+                    XCTAssertEqual(fixture.guardService.stateSnapshot().token, fixture.token)
+                }
+                fixture.advance(10)
+                fixture.guardService.heartbeat(token: fixture.token)
+                fixture.guardService.checkScheduled()
+                XCTAssertEqual(fixture.battery.reads, 2)
+                XCTAssertEqual(fixture.guardService.drainStopEvents().first?.reason,
+                               percent == nil ? .batteryUnavailable : .lowBattery)
+                XCTAssertNil(fixture.guardService.stateSnapshot().token)
+                XCTAssertNil(fixture.guardService.stateSnapshot().scheduledCheckDeadline)
+                XCTAssertEqual(fixture.power.releases, 1)
+                XCTAssertEqual(fixture.power.acquisitions.count, 3)
+            }
+        }
+    }
+
+    func testNewSessionGetsItsOwnBatteryReadDeadlineAndIdleScheduledChecksReadNothing() throws {
+        let fixture = Fixture()
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 0)
+        try fixture.begin()
+        fixture.advance(10)
+        fixture.guardService.stop(token: fixture.token, reason: .manual)
+        _ = fixture.guardService.drainStopEvents()
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 1)
+        XCTAssertNil(fixture.guardService.stateSnapshot().nextBatteryCheck)
+        XCTAssertNil(fixture.guardService.stateSnapshot().scheduledCheckDeadline)
+
+        let newToken = UUID()
+        try fixture.guardService.begin(token: newToken, keepScreenAwake: false, timeout: 900)
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_040)
+        for _ in 0..<2 {
+            fixture.advance(10)
+            fixture.guardService.heartbeat(token: newToken)
+            fixture.guardService.checkScheduled()
+            XCTAssertEqual(fixture.battery.reads, 2)
+        }
+        fixture.advance(10)
+        fixture.guardService.heartbeat(token: newToken)
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 3)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().token, newToken)
+    }
+
+    func testScheduledChecksStillStopAtHeartbeatTimeoutWithoutExtraBatteryReads() throws {
+        let fixture = Fixture()
+        try fixture.begin()
+        for _ in 0..<3 {
+            fixture.advance(10)
+            fixture.guardService.checkScheduled()
+        }
+        XCTAssertEqual(fixture.guardService.drainStopEvents().first?.reason, .unresponsive)
+        XCTAssertEqual(fixture.battery.reads, 1)
+        XCTAssertEqual(fixture.power.acquisitions.count, 3)
+        XCTAssertEqual(fixture.power.releases, 1)
+    }
+
+    func testExpiryCoincidingWithScheduledBatteryReadDoesNotReadOrRewriteCompletion() throws {
+        let fixture = Fixture()
+        try fixture.begin(seconds: 30)
+        for _ in 0..<2 {
+            fixture.advance(10)
+            fixture.guardService.heartbeat(token: fixture.token)
+            fixture.guardService.checkScheduled()
+        }
+        fixture.battery.value = BatteryReading(hasBattery: true, percent: 1, onAC: false)
+        fixture.advance(10)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.guardService.drainStopEvents().first?.reason, .expired)
+        XCTAssertEqual(fixture.battery.reads, 1)
+        XCTAssertEqual(fixture.power.acquisitions.map(\.timeout), [30, 20, 10])
+    }
+
+    func testDelayedScheduledBatteryReadRechecksDeadlineBeforeRenewingLease() throws {
+        let fixture = Fixture()
+        try fixture.begin(seconds: 40)
+        for _ in 0..<2 {
+            fixture.advance(10)
+            fixture.guardService.heartbeat(token: fixture.token)
+            fixture.guardService.checkScheduled()
+        }
+        fixture.battery.onRead = { [weak fixture] in fixture?.advance(20) }
+        fixture.advance(10)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        let event = try XCTUnwrap(fixture.guardService.drainStopEvents().first)
+        XCTAssertEqual(event.reason, .expired)
+        XCTAssertEqual(event.continuousTime, 1_040)
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.power.acquisitions.count, 3)
+        XCTAssertEqual(fixture.power.releases, 1)
+    }
+
+    func testHealthySlowReadKeepsNextSamplingAnchoredToWhenTheReadStarted() throws {
+        let fixture = Fixture()
+        try fixture.begin()
+        for _ in 0..<2 {
+            fixture.advance(10)
+            fixture.guardService.heartbeat(token: fixture.token)
+            fixture.guardService.checkScheduled()
+        }
+        fixture.battery.onRead = { [weak fixture] in fixture?.advance(19) }
+        fixture.advance(10)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        fixture.battery.onRead = nil
+
+        XCTAssertEqual(fixture.clock.continuous, 1_049)
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_060)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline, 1_059)
+        XCTAssertTrue(fixture.guardService.drainStopEvents().isEmpty)
+
+        fixture.advance(10)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 2)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().scheduledCheckDeadline, 1_060)
+
+        fixture.advance(1)
+        fixture.guardService.heartbeat(token: fixture.token)
+        fixture.guardService.checkScheduled()
+        XCTAssertEqual(fixture.battery.reads, 3)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().nextBatteryCheck, 1_090)
+        XCTAssertEqual(fixture.guardService.stateSnapshot().token, fixture.token)
+    }
+
     func testGuardDelayPastLeaseDoesNotResurrectLostProtection() throws {
         let fixture = Fixture()
         try fixture.begin()

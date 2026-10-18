@@ -57,10 +57,13 @@ final class SessionSafetyGuard {
     struct Snapshot {
         let token: UUID?
         let deadline: TimeInterval?
+        let nextBatteryCheck: TimeInterval?
+        let scheduledCheckDeadline: TimeInterval?
         let terminalEvents: [StopEvent]
     }
 
     static let checkInterval: TimeInterval = 10
+    static let batteryCheckInterval: TimeInterval = 30
     static let heartbeatTimeout: TimeInterval = 30
     static let maximumLease: TimeInterval = 45
     static let sleepGapTolerance: TimeInterval = 1
@@ -71,6 +74,7 @@ final class SessionSafetyGuard {
         var deadline: TimeInterval
         let maximumDeadline: TimeInterval
         var leaseDeadline: TimeInterval
+        var nextBatteryCheck: TimeInterval
         var lastClock: SessionSafetyClock
         var lastHeartbeatUptime: TimeInterval
     }
@@ -84,6 +88,7 @@ final class SessionSafetyGuard {
     private let deliverToMain: (@escaping () -> Void) -> Void
     private var session: Session?
     private var timer: DispatchSourceTimer?
+    private var scheduledCheckDeadline: TimeInterval?
     private var terminalEvents: [StopEvent] = []
     private var stopHandler: ((StopEvent) -> Void)?
     private var recordHandler: ((StopEvent) -> Void)?
@@ -141,6 +146,7 @@ final class SessionSafetyGuard {
                               deadline: now.continuous + timeout,
                               maximumDeadline: now.continuous + SessionModel.maximumSessionSeconds,
                               leaseDeadline: now.continuous + min(Self.maximumLease, timeout),
+                              nextBatteryCheck: now.continuous + Self.batteryCheckInterval,
                               lastClock: now, lastHeartbeatUptime: now.uptime)
             // A delayed OS acquisition must not report an already stale session.
             let afterAcquisition = clock()
@@ -249,6 +255,8 @@ final class SessionSafetyGuard {
 
     func stateSnapshot() -> Snapshot {
         synchronized { Snapshot(token: session?.token, deadline: session?.deadline,
+                                nextBatteryCheck: session?.nextBatteryCheck,
+                                scheduledCheckDeadline: scheduledCheckDeadline,
                                 terminalEvents: terminalEvents) }
     }
 
@@ -266,24 +274,35 @@ final class SessionSafetyGuard {
         synchronized { check(renewLease: renewLease) }
     }
 
-    private func check(renewLease: Bool) {
+    /// Periodic safety and lease work stays frequent; only scheduled battery
+    /// sampling is throttled. Explicit observations always use checkNow instead.
+    func checkScheduled() {
+        synchronized { check(renewLease: true, forceBatteryRead: false) }
+    }
+
+    private func check(renewLease: Bool, forceBatteryRead: Bool = true) {
         guard var active = session else { return }
         var now = clock()
         if let reason = timingStopReason(for: active, at: now) {
             terminate(reason, at: now)
             return
         }
-        let reading = battery.read()
-        // IOKit is synchronous. Recheck time after it returns, rather than renew
-        // a lease using a timestamp captured before a potentially delayed read.
-        now = clock()
-        if let reason = timingStopReason(for: active, at: now) {
-            terminate(reason, at: now)
-            return
-        }
-        if let reason = batteryStopReason(reading) {
-            terminate(reason, at: now)
-            return
+        if forceBatteryRead || now.continuous >= active.nextBatteryCheck {
+            let readStartedAt = now.continuous
+            let reading = battery.read()
+            // IOKit is synchronous. Recheck time after it returns, rather than
+            // renew a lease using a timestamp captured before a delayed read.
+            now = clock()
+            if let reason = timingStopReason(for: active, at: now) {
+                terminate(reason, at: now)
+                return
+            }
+            if let reason = batteryStopReason(reading) {
+                terminate(reason, at: now)
+                return
+            }
+            // A slow read must not add its own latency to the sampling cadence.
+            active.nextBatteryCheck = readStartedAt + Self.batteryCheckInterval
         }
         if renewLease {
             let timeout = min(Self.maximumLease, active.deadline - now.continuous)
@@ -361,19 +380,23 @@ final class SessionSafetyGuard {
     }
 
     private func scheduleNextCheck() {
-        guard automaticallySchedule, let active = session else { return }
+        guard let active = session else { return }
+        let now = clock().continuous
+        let interval = max(0.001, min(Self.checkInterval, active.deadline - now,
+                                      active.nextBatteryCheck - now))
+        scheduledCheckDeadline = now + interval
+        guard automaticallySchedule else { return }
         if timer == nil {
             let source = DispatchSource.makeTimerSource(queue: queue)
-            source.setEventHandler { [weak self] in self?.check(renewLease: true) }
+            source.setEventHandler { [weak self] in self?.checkScheduled() }
             timer = source
             source.resume()
         }
-        let remaining = active.deadline - clock().continuous
-        let interval = max(0.001, min(Self.checkInterval, remaining))
         timer?.schedule(deadline: .now() + interval, leeway: .milliseconds(Int(min(1, interval / 10) * 1_000)))
     }
 
     private func cancelTimer() {
+        scheduledCheckDeadline = nil
         timer?.setEventHandler {}
         timer?.cancel()
         timer = nil

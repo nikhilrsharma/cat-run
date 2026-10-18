@@ -1,8 +1,18 @@
-# Cat Run 0.3.1 validation
+# Cat Run 0.3.2 validation
 
-Checked October 17, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
+Checked October 18, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Separated periodic battery reads from the existing safety cadence: a 30-second active-only fallback supplies fresh charge, while the guard retains its 10-second timing and lease checks. Start, extension, power-source notifications, and activation/wake paths still request fresh readings without waiting for the fallback.
+- Removed the “Local time” label from Activity. Recorded timestamps continue to show local time and timezone; the date groups and logs navigation are unchanged.
+
+- All **263 tests passed**: 138 native and 125 core. Nine new counting/timing regressions verify 30-second periodic reads alongside 10-second lease checks, immediate event and extension reads, an event falling between guard ticks, low/unavailable charge on AC and battery, new-session reset, no idle reads, heartbeat failure, expiry priority, and delayed reads. A 19-second simulated read keeps the next sample anchored to its original start, rather than adding that delay to the next interval.
+- Battery intervals and failure handling were tested with controlled clocks/readers and power-service doubles. These checks verify the policy and scheduling path; they do not measure energy savings or substitute for real battery-drain testing.
+- Installed **0.3.2/build 17** after backing up the previous app. Native inspection confirmed the saved duration, recent values, screen-awake choice, enabled login setting, previous stop outcome, and encrypted activity survived. The user completed macOS's Keychain approval after the local signature changed. About shows the updated version/date; Activity has no “Local time” caption, retains local timestamps and date headings, and Back returns to Settings. The app remained inactive during these checks.
+- Built, installed, and extracted app archives match byte for byte across all four bundle files and pass strict signature verification. App Sandbox remains the only entitlement and hardened runtime remains enabled. The previous local package is backed up. All 59 intended publication files passed the privacy scan; personal paths, contact details, keys, user activity, and local test artifacts are excluded from public source.
+
+## Checks retained from 0.3.1
 
 - Moved View logs directly beneath Back, matching its 86×30-point size and 13-point button text. The button shares the vertical center of Launch at login; the checkbox has its own width and a 14-point gap before the button. Both controls remain fully inside the Settings page.
 - All 24 existing focused layout tests passed, including min/max Settings states, login errors/approval states, logs navigation and text fitting. No timer, encryption, battery, or logging behavior changed; the complete 254-test run below describes 0.3.0.

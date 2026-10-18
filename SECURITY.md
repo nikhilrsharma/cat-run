@@ -1,5 +1,7 @@
 # Security and release verification
 
+Version 0.3.2 · Updated October 18, 2026
+
 ## Permissions and data
 
 The packaged app requests only `com.apple.security.app-sandbox`. Its signed entitlement file contains no network client/server, user-selected file, home-folder, device, Apple Events, or temporary-exception entitlements. The build enables hardened runtime and does not enable JIT, unsigned executable memory, debugging, or disabled library validation.
@@ -36,7 +38,8 @@ There is no updater, remote code, network service, analytics, or telemetry. The 
 - Below 15% battery: refuse activation and stop an active timer, both on battery and while connected to power. Confirm the boundary at 15% and 14%.
 - Missing battery readings on a battery-equipped Mac: do not silently assume a safe level. A desktop without an internal battery must be distinguished from an unreadable laptop battery.
 - Confirm that the app releases both system and display assertions on stop, expiry, low battery, and quit. Confirm that terminating the process leaves no assertion owned by that process.
-- Confirm independent 10-second active-only charge checks, a 30-second UI heartbeat threshold, and OS assertion leases of at most 45 seconds or the remaining duration. Simulate delayed battery reads, a stalled main thread, and a stalled guard; expired protection must not be silently reacquired. These are scheduling and lease limits, not a guarantee that physical charge cannot fall below 15% between reports.
+- Confirm the 30-second fallback interval for active-only periodic battery reads and immediate fresh reads before start/extension, on launch/activation/wake, and on macOS power-source notifications. Event-driven checks must not wait for the fallback. Confirm that idle periods perform no periodic battery polling.
+- Confirm that the independent guard still runs every 10 seconds, with up to one second of scheduling tolerance, to check responsiveness, sleep, deadlines, and assertion leases. Retain the 30-second UI heartbeat threshold and OS assertion leases of at most 45 seconds or the remaining duration. Simulate delayed battery reads, a stalled main thread, and a stalled guard; expired protection must not be silently reacquired. The 30-second battery fallback is a target interval, not a maximum detection-delay guarantee: macOS reporting or scheduling can delay a reading, and physical charge can fall below 15% between reports. Reduced query work may produce modest savings, but no battery-life gain has been measured.
 - Verify sleep cancellation through the ordinary notification, wake fallback, and continuous-versus-awake clock comparison. Locking the screen and display-only sleep should not be mistaken for whole-system sleep. Check external-monitor closed-lid behavior separately.
 - Verify the deadline ordering: a low reading detected before expiry stops for battery; a reading first obtained after an awake deadline does not rewrite completion. Sleep evidence takes priority over claiming successful completion.
 - Confirm that the display-awake choice and start-at-login setting cannot be changed during an active timer.
@@ -45,7 +48,7 @@ There is no updater, remote code, network service, analytics, or telemetry. The 
 - Unplug during a running timer: it should continue when charge remains valid and at least 15%. A later usable low projection belongs in the window notice, without a modal interruption; a missing forecast should remain quiet.
 - Check malformed, oversized, unsupported-version, and symbolic-link journal inputs. A corrupt record must not be presented as a completed timer; a failed record write must not start unrecorded protection.
 - Check authenticated round trips, tampered ciphertext, wrong or missing keys, temporary Keychain denial, unavailable storage, and recovery without plaintext fallback. Verify that existing encrypted data in either the journal or logs prevents replacement-key creation.
-- Verify log order after equal timestamps and wall-clock rollback; rolling seven-day expiry; the 4,000-entry and 2 MiB bounds; owner-only permissions; and cleanup after an interrupted atomic write. Test legacy journal/quarantine encryption, expiration, count limits, and unsafe-file rejection.
+- Verify local log timestamps and timezone labels remain correct without the removed “Local time” heading. Verify log order after equal timestamps and wall-clock rollback; rolling seven-day expiry; the 4,000-entry and 2 MiB bounds; owner-only permissions; and cleanup after an interrupted atomic write. Test legacy journal/quarantine encryption, expiration, count limits, and unsafe-file rejection.
 - Verify app-run marker renewal after retention, unknown-cause recovery after force quit, and clean-quit deduplication. A delayed or failed log write must not delay release of power assertions. Exercise actual Keychain approval and signing changes on an installed bundle; injected-key tests do not prove those macOS interactions.
 - Verify sleep, wake, AC changes, screen locking, display changes, and window resizing on a real Mac. Power assertions cannot override all macOS sleep causes.
 - Test login registration, the approval-required state, disabling it, and an actual logout/login using the installed bundle. Do not enable login during an automated test.
