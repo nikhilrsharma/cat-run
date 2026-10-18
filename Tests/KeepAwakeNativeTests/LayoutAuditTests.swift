@@ -23,13 +23,15 @@ final class LayoutAuditTests: XCTestCase {
         var notices: [(String, String)] = []
         for locale in locales {
             for date in dates {
-                for reason in [SessionStopReason.expired, .batteryUnavailable] {
-                    let data = try JSONSerialization.data(withJSONObject: [
+                for reason in [SessionStopReason.expired, .batteryUnavailable, .systemSleep] {
+                    var recordData: [String: Any] = [
                         "version": 1, "id": UUID().uuidString,
                         "startedAt": date.addingTimeInterval(-900).timeIntervalSince1970,
-                        "state": "finished", "reason": reason.rawValue,
-                        "endedAt": date.timeIntervalSince1970
-                    ])
+                        "state": "finished", "reason": reason.rawValue
+                    ]
+                    // Missed sleep callbacks can establish detection time only.
+                    recordData[reason == .systemSleep ? "detectedAt" : "endedAt"] = date.timeIntervalSince1970
+                    let data = try JSONSerialization.data(withJSONObject: recordData)
                     let record = try decoder.decode(SessionRecord.self, from: data)
                     notices.append(("\(locale), \(date), \(reason)",
                                     SessionNotice.message(for: record, locale: Locale(identifier: locale), timeZone: zone)))
@@ -45,6 +47,7 @@ final class LayoutAuditTests: XCTestCase {
             let notice = try XCTUnwrap(descendants(root).compactMap { $0 as? NSTextField }
                 .first { $0.identifier?.rawValue == "notice" })
             let action = try XCTUnwrap(descendants(root).first { $0.identifier?.rawValue == "action" })
+            let battery = try XCTUnwrap(descendants(root).first { $0.identifier?.rawValue == "battery" })
             controller.applyBounds(visibleFrame: NSRect(x: 0, y: 0, width: 1728, height: 1080))
             for size in [window.minSize, window.maxSize] {
                 window.setFrame(NSRect(origin: .zero, size: size), display: false)
@@ -57,6 +60,9 @@ final class LayoutAuditTests: XCTestCase {
                     try assertTextFits(notice, context: "\(size) \(context)")
                     let noticeFrame = notice.convert(notice.bounds, to: root)
                     let actionFrame = action.convert(action.bounds, to: root)
+                    let batteryFrame = battery.convert(battery.bounds, to: root)
+                    XCTAssertGreaterThanOrEqual(noticeFrame.minY, batteryFrame.maxY + 4,
+                                                "Outcome collides with battery: \(context)")
                     XCTAssertLessThanOrEqual(noticeFrame.maxY, actionFrame.minY,
                                              "Outcome collides with Start: \(context)")
                 }

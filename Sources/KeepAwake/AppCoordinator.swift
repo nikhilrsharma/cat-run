@@ -19,8 +19,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let safety = SessionSafetyGuard()
     private let monitor = BatteryMonitor()
     private let login = LoginService()
-    private let journal = SessionJournal(url: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Cat Run/session.json"))
+    private let storageURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Cat Run", isDirectory: true)
+    private lazy var keyVault = AuditKeyVault(hasEncryptedData: { [storageURL] in
+        AuditKeyVault.hasEncryptedHistory(in: storageURL)
+    })
+    private lazy var journal = SessionJournal(url: storageURL.appendingPathComponent("session.json"),
+        encryptionKeyProvider: { [keyVault] in try keyVault.key(existingEncryptedData: $0) })
+    private lazy var audit = AuditLogger(store: EncryptedAuditLog(directoryURL: storageURL.appendingPathComponent("Logs", isDirectory: true),
+        keyProvider: { [keyVault] in try keyVault.key(existingEncryptedData: $0) }))
     private lazy var window = AppWindow()
     private lazy var status = CatStatusItem()
     private var reading = BatteryReading(hasBattery: true, percent: nil, onAC: false)
@@ -34,16 +41,33 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var legacyNotice = UserDefaults.standard.string(forKey: "lastSafetyStop") ?? ""
     private var failedLoginRequest: Bool?
     private var userSessionActive = true
+    private var forecastRiskWasVisible = false
+    private var hasObservedPowerSource = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.setActivationPolicy(.accessory)
         installMenu()
+        var cleanupFailed = false
+        do { try journal.pruneQuarantines() } catch { cleanupFailed = true }
         restoreOutcome()
+        audit.onMaintenance = { [journal, weak audit] in
+            do { try journal.pruneQuarantines() }
+            catch { audit?.record("Older session recovery files could not be cleaned up.") }
+        }
+        audit.start(previousOutcome: lastRecord) { [weak self] snapshot in
+            self?.window.renderLogs(events: snapshot.events, error: snapshot.error?.message)
+        }
+        if cleanupFailed { audit.record("Older session recovery files could not be cleaned up.") }
         // Recording runs on the guard queue even when the interface is unresponsive.
         // A failed write leaves the active marker for conservative interruption recovery.
-        safety.onStopRecorded = { [journal] event in
-            try? journal.finish(id: event.token, reason: event.reason.rawValue, endedAt: event.date)
+        safety.onStopRecorded = { [journal, audit] event in
+            do {
+                try journal.finish(id: event.token, reason: event.reason.rawValue,
+                                   endedAt: event.timeIsDetection ? nil : event.date,
+                                   detectedAt: event.timeIsDetection ? event.date : nil)
+            } catch { audit.record("Timer stopped, but its saved status could not be updated.", sessionID: event.token) }
+            audit.recordStop(event)
         }
         safety.onStop = { [weak self] _ in
             guard let self else { return }
@@ -55,16 +79,25 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
         window.onDuration = { [weak self] value in
             guard let self else { return }
-            if self.model.setDurationMinutes(value) { self.clearPending(); self.transientNotice = ""; self.save(); self.render() }
+            let previous = self.model.selectedDurationMinutes
+            if self.model.setDurationMinutes(value) {
+                if value != previous { self.audit.record("Duration selected · \(DurationFormat.string(seconds: TimeInterval(value * 60))).") }
+                self.clearPending(); self.transientNotice = ""; self.save(); self.render()
+            }
         }
         window.onScreen = { [weak self] value in
             guard let self else { return }
-            if self.model.setKeepScreenAwake(value) { self.clearPending(); self.save(); self.render() }
+            let previous = self.model.keepScreenAwake
+            if self.model.setKeepScreenAwake(value) {
+                if value != previous { self.audit.record("Keep screen awake · \(value ? "On" : "Off").") }
+                self.clearPending(); self.save(); self.render()
+            }
         }
         window.onRecent = { [weak self] value in self?.requestStart(duration: value) }
         window.onExtend = { [weak self] in self?.requestStart(extensionRequest: true) }
         window.onLogin = { [weak self] enabled in self?.setLogin(enabled) }
         window.onLoginSettings = { [weak self] in guard let self, !self.model.active else { return }; self.login.openSystemSettings() }
+        window.onViewLogs = { [weak self] in self?.audit.refresh() }
         window.onShow = { [weak self] in self?.refreshBattery() }
         status.onOpen = { [weak self] in
             guard let self else { return }
@@ -76,20 +109,28 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         // Register wake fallback before the monitor: a wake must reconcile a running
         // session as interrupted before a fresh battery sample can label it finished.
         let workspace = NSWorkspace.shared.notificationCenter
-        observers.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.stop(.systemSleep) })
+        observers.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }; self.stop(.systemSleep); self.audit.record("Mac is entering sleep.")
+        })
         observers.append(workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }; self.stop(.systemSleep); self.refreshBattery()
+            guard let self else { return }; self.stop(.systemSleep, timeIsDetection: true)
+            self.audit.record("Mac woke from sleep."); self.refreshBattery()
         })
         observers.append(workspace.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }; self.userSessionActive = false; self.stop(.sessionInactive)
+            self.audit.record("User session became inactive.")
         })
         observers.append(workspace.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }; self.userSessionActive = true; self.refreshBattery()
+            guard let self else { return }; self.userSessionActive = true
+            self.audit.record("User session became active."); self.refreshBattery()
         })
-        observers.append(workspace.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in self?.stop(.shutdown) })
+        observers.append(workspace.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }; self.stop(.shutdown)
+            self.audit.record("Logout, restart or shutdown requested; macOS did not identify which.")
+        })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshBattery() })
-        observers.append(NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in self?.render() })
-        observers.append(NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.render() })
+        observers.append(NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in self?.audit.refresh(); self?.render() })
+        observers.append(NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.audit.refresh(); self?.render() })
         monitor.start()
         render()
         let isLoginLaunch = NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
@@ -102,6 +143,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         if let token = sessionToken { safety.stop(token: token, reason: .quit) }
         consumeSafetyEvents()
         safety.release(); cancelTimers(); monitor.stop(); status.invalidate(); save()
+        audit.finish()
         observers.forEach { NotificationCenter.default.removeObserver($0); NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
 
@@ -130,12 +172,16 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             ? model.prepareExtension(battery: reading, now: ContinuousTime.now, confirmRisk: confirmed)
             : model.prepareStart(durationMinutes: selected, battery: reading, now: ContinuousTime.now, confirmRisk: confirmed)
         switch result {
-        case .blocked(let reason): transientNotice = reason.message; render()
+        case .blocked(let reason):
+            audit.record("\(extensionRequest ? "Extension" : "Start") blocked · \(reason.message)", sessionID: sessionToken)
+            transientNotice = reason.message; render()
         case .warning(_, let warning):
+            audit.record("Battery warning shown before \(extensionRequest ? "extending" : "starting") the timer.", sessionID: sessionToken)
             let token = UUID(); pendingWarning = token
             window.confirmWarning(warning.message) { [weak self] accepted in
                 guard let self, self.pendingWarning == token else { return }
                 self.pendingWarning = nil
+                self.audit.record("Battery warning · \(accepted ? "Continue selected" : "Cancelled").", sessionID: self.sessionToken)
                 if accepted { self.requestStart(duration: selected, extensionRequest: extensionRequest, confirmed: true) }
             }
         case .ready(let plan):
@@ -160,6 +206,12 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                 // The main thread is responsive again after synchronous OS work.
                 // Do not count acquisition latency against its next heartbeat.
                 safety.heartbeat(token: token)
+                if plan.isExtension {
+                    audit.record("Timer extended by 15m · Total \(DurationFormat.string(seconds: model.totalDurationSeconds)).", sessionID: token)
+                } else {
+                    audit.record("Timer started · \(DurationFormat.string(seconds: plan.timeoutSeconds)) · Screen awake \(plan.keepScreenAwake ? "on" : "off").",
+                                 kind: .timerStarted, sessionID: token)
+                }
                 transientNotice = ""; legacyNotice = ""; lastRecord = nil
                 UserDefaults.standard.removeObject(forKey: "lastSafetyStop")
                 save(); scheduleTimers(); render()
@@ -180,24 +232,33 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
                     transientNotice = model.active ? "Could not extend the timer. The original timer is still running." : "The timer stopped. Please start again."
                 }
                 render()
+                audit.record(plan.isExtension ? "Timer extension failed." : "Timer could not start safely.", sessionID: token)
             }
         }
     }
 
     private func receive(_ fresh: BatteryReading) {
+        if hasObservedPowerSource, reading.hasBattery, fresh.hasBattery, reading.onAC != fresh.onAC {
+            audit.record(fresh.onAC ? "Power connected." : "Power disconnected.")
+        }
+        hasObservedPowerSource = true
         reading = fresh
         safety.checkNow()
         consumeSafetyEvents()
         if pendingWarning != nil, fresh.hasBattery, (fresh.validPercent == nil || fresh.validPercent! < 15) {
             clearPending()
+            audit.record("Battery warning dismissed because current charge could not safely support a start.", sessionID: sessionToken)
             transientNotice = fresh.validPercent == nil ? StartBlockReason.batteryUnavailable.message : StartBlockReason.lowBattery.message
         }
+        let riskVisible = model.active && SessionModel.forecastWarning(battery: reading, seconds: model.remaining(at: ContinuousTime.now)) != nil
+        if riskVisible && !forecastRiskWasVisible { audit.record("Battery forecast now falls below 15%; actual-charge protection remains active.", sessionID: sessionToken) }
+        forecastRiskWasVisible = riskVisible
         render()
     }
     private func refreshBattery() { receive(monitor.refresh()) }
-    private func stop(_ reason: SessionStopReason) {
+    private func stop(_ reason: SessionStopReason, timeIsDetection: Bool = false) {
         clearPending()
-        if let token = sessionToken { safety.stop(token: token, reason: reason) }
+        if let token = sessionToken { safety.stop(token: token, reason: reason, timeIsDetection: timeIsDetection) }
         consumeSafetyEvents(); render()
     }
 
@@ -212,7 +273,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             cancelTimers(); clearPending(); transientNotice = ""
             lastRecord = try? journal.load()
             if lastRecord?.id != event.token || lastRecord?.state != .finished {
-                transientNotice = "Timer stopped; its status could not be saved."
+                transientNotice = event.timeIsDetection
+                    ? "\(event.reason.message)\nDetected later; stop time unknown."
+                    : SessionNotice.message(for: event.reason, finishedAt: event.date)
                 lastRecord = nil
             }
             save()
@@ -222,8 +285,14 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private func clearPending() { pendingWarning = nil; window.cancelWarning() }
     private func setLogin(_ enabled: Bool) {
         guard !model.active else { render(); return }
-        do { try login.setEnabled(enabled); failedLoginRequest = nil }
-        catch { failedLoginRequest = enabled }
+        do {
+            try login.setEnabled(enabled); failedLoginRequest = nil
+            audit.record(login.status == .requiresApproval ? "Launch at login requested · macOS approval required."
+                : "Launch at login · \(enabled ? "On" : "Off").")
+        } catch {
+            failedLoginRequest = enabled
+            audit.record("Could not turn \(enabled ? "on" : "off") launch at login.")
+        }
         render()
     }
     private func scheduleTimers() {
@@ -262,7 +331,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             }
         } else if view.notice.isEmpty {
             view.notice = SessionNotice.message(for: lastRecord)
-            if view.notice.isEmpty { view.notice = !legacyNotice.isEmpty ? legacyNotice : SessionNotice.message(for: model.stopReason, finishedAt: model.finishedAt) }
+            if view.notice.isEmpty { view.notice = !legacyNotice.isEmpty ? legacyNotice : SessionNotice.message(for: model.stopReason, finishedAt: model.stoppedAt) }
         }
         if !model.active, reading.hasBattery, let percent = reading.validPercent, percent < 15, view.notice.isEmpty { view.notice = StartBlockReason.lowBattery.message }
         let loginStatus = login.status

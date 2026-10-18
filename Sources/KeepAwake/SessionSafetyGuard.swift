@@ -51,6 +51,8 @@ final class SessionSafetyGuard {
         let reason: SessionStopReason
         let continuousTime: TimeInterval
         let date: Date
+        /// A missed sleep event is detected later; this is not its actual stop time.
+        let timeIsDetection: Bool
     }
     struct Snapshot {
         let token: UUID?
@@ -206,7 +208,7 @@ final class SessionSafetyGuard {
     }
 
     /// Serializes user/lifecycle stops with background battery and expiry events.
-    func stop(token: UUID, reason: SessionStopReason) {
+    func stop(token: UUID, reason: SessionStopReason, timeIsDetection: Bool = false) {
         synchronized {
             guard let active = session, active.token == token else { return }
             let now = clock()
@@ -218,7 +220,7 @@ final class SessionSafetyGuard {
             } else {
                 actualReason = reason
             }
-            terminate(actualReason, at: now)
+            terminate(actualReason, at: now, timeIsDetection: timeIsDetection)
         }
     }
 
@@ -337,7 +339,7 @@ final class SessionSafetyGuard {
         return percent < SessionModel.minimumBatteryPercent ? .lowBattery : nil
     }
 
-    private func terminate(_ reason: SessionStopReason, at now: SessionSafetyClock) {
+    private func terminate(_ reason: SessionStopReason, at now: SessionSafetyClock, timeIsDetection: Bool = false) {
         guard let active = session else { return }
         cancelTimer()
         power.release()
@@ -349,7 +351,10 @@ final class SessionSafetyGuard {
         let stopDate = reason == .expired && now.continuous.isFinite
             ? observedDate.addingTimeInterval(min(0, active.deadline - now.continuous)) : observedDate
         let event = StopEvent(token: active.token, reason: reason,
-                              continuousTime: stoppedAt, date: stopDate)
+                              continuousTime: stoppedAt, date: stopDate,
+                              timeIsDetection: reason == .systemSleep && (timeIsDetection ||
+                                (now.isValid && now.continuous - active.lastClock.continuous -
+                                 (now.uptime - active.lastClock.uptime) > Self.sleepGapTolerance)))
         terminalEvents.append(event)
         recordHandler?(event)
         if let callback = stopHandler { deliverToMain { callback(event) } }

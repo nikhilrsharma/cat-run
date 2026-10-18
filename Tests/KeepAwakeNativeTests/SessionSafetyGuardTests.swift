@@ -136,8 +136,23 @@ final class SessionSafetyGuardTests: XCTestCase {
         try fixture.begin(seconds: 100)
         fixture.advance(600, awake: 5)
         fixture.guardService.checkNow()
-        XCTAssertEqual(fixture.guardService.drainStopEvents().first?.reason, .systemSleep)
+        let event = try XCTUnwrap(fixture.guardService.drainStopEvents().first)
+        XCTAssertEqual(event.reason, .systemSleep)
+        XCTAssertTrue(event.timeIsDetection)
         XCTAssertEqual(fixture.power.releases, 1)
+    }
+
+    func testObservedSleepAndWakeFallbackKeepDifferentTimeMeanings() throws {
+        for detected in [false, true] {
+            let fixture = Fixture()
+            try fixture.begin()
+            fixture.advance(10)
+            fixture.guardService.stop(token: fixture.token, reason: .systemSleep, timeIsDetection: detected)
+            let event = try XCTUnwrap(fixture.guardService.drainStopEvents().first)
+            XCTAssertEqual(event.timeIsDetection, detected)
+            XCTAssertEqual(event.date, fixture.clock.date)
+            XCTAssertEqual(fixture.power.releases, 1)
+        }
     }
 
     func testOrdinarySmallClockSamplingDifferenceDoesNotLookLikeSleep() throws {

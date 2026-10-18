@@ -4,23 +4,49 @@ public enum SessionStopReason: String, Codable, Equatable {
     case manual, expired, lowBattery, batteryUnavailable, clockUnavailable, assertionFailure, systemSleep, quit
     case unresponsive, sessionInactive, shutdown, interrupted, storageFailure
 
-    public var message: String {
+    /// A compact reason shared by the timer notice and the activity log.
+    public var shortLabel: String {
         switch self {
-        case .manual: return "Timer stopped."
-        case .expired: return "Timer finished."
-        case .lowBattery: return "Stopped: battery below 15%. Charge to at least 15% before starting again."
-        case .batteryUnavailable: return "Stopped: battery protection could not be verified."
-        case .clockUnavailable: return "Stopped: the timer clock could not be verified. You can try again."
-        case .assertionFailure: return "Stopped: the keep-awake request failed. You can try again."
-        case .systemSleep: return "Stopped when your Mac went to sleep. Start a new timer when ready."
-        case .quit: return "Timer stopped when Cat Run quit."
-        case .unresponsive: return "Stopped because Cat Run stopped responding."
-        case .sessionInactive: return "Stopped when you switched users."
-        case .shutdown: return "Stopped for logout or shutdown."
-        case .interrupted: return "Previous timer interrupted. Stop time unknown."
-        case .storageFailure: return "Stopped: session status could not be saved."
+        case .manual: return "Stopped by you"
+        case .expired: return "Time elapsed"
+        case .lowBattery: return "Battery below 15%"
+        case .batteryUnavailable: return "Battery reading unavailable"
+        case .clockUnavailable: return "Timer clock unavailable"
+        case .assertionFailure: return "Keep-awake request failed"
+        case .systemSleep: return "Mac went to sleep"
+        case .quit: return "Cat Run quit"
+        case .unresponsive: return "App stopped responding"
+        case .sessionInactive: return "User switched"
+        case .shutdown: return "Logout, restart or shutdown"
+        case .interrupted: return "Unexpected interruption"
+        case .storageFailure: return "Session could not be saved"
         }
     }
+
+    public var message: String {
+        let title = "Timer stopped · \(shortLabel)"
+        return self == .interrupted ? "\(title)\nCause and stop time unknown." : title
+    }
+
+    /// No crash or shutdown cause is inferred after an unrecorded interruption.
+    public var auditDescription: String {
+        switch self {
+        case .manual: return "Timer stopped by you."
+        case .expired: return "Timer stopped because its time elapsed."
+        case .lowBattery: return "Timer stopped because battery charge fell below 15%."
+        case .batteryUnavailable: return "Timer stopped because battery protection could not be verified."
+        case .clockUnavailable: return "Timer stopped because its clock could not be verified."
+        case .assertionFailure: return "Timer stopped because the keep-awake request failed."
+        case .systemSleep: return "Timer stopped when the Mac went to sleep."
+        case .quit: return "Timer stopped when Cat Run quit."
+        case .unresponsive: return "Timer stopped because Cat Run stopped responding."
+        case .sessionInactive: return "Timer stopped when the active user changed."
+        case .shutdown: return "Timer stopped for logout, restart or shutdown; macOS did not identify which."
+        case .interrupted: return "Unexpected timer interruption detected. Cause and stop time unknown."
+        case .storageFailure: return "Timer stopped because its session status could not be saved."
+        }
+    }
+
 }
 
 public enum StartBlockReason: Equatable {

@@ -25,18 +25,20 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     var onExtend: (() -> Void)?
     var onLogin: ((Bool) -> Void)?
     var onLoginSettings: (() -> Void)?
+    var onViewLogs: (() -> Void)?
     var onShow: (() -> Void)?
     private let root = DarkView()
     private let main = FlippedView()
     private let settings = FlippedView()
+    private let logs = AuditLogView()
     private let brand = BrandWordmark(frame: .zero)
     private let cat = NSImageView()
     private let navigation = FlatButton("Settings", size: 13)
     private let title = AppWindow.label("Duration", size: 15)
     private let time = AppWindow.label("15m", size: 15)
     private let slider = NSSlider(value: 15, minValue: 15, maxValue: 360, target: nil, action: nil)
-    private let minus = FlatButton("−", size: 19, soft: true)
-    private let plus = FlatButton("+", size: 19, soft: true)
+    private let minus = FlatButton("−", size: 19, soft: true, dimWhenDisabled: true)
+    private let plus = FlatButton("+", size: 19, soft: true, dimWhenDisabled: true)
     private let recentTitle = AppWindow.label("Previously used", size: 13)
     private let recent = FlippedView()
     private let recentEmpty = AppWindow.label("No timers used yet.", size: 13)
@@ -52,6 +54,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private let login = CatCheckbox("Launch at login")
     private let loginNote = AppWindow.label("", size: 13)
     private let approval = FlatButton("Open Login Settings", size: 14)
+    private let viewLogs = FlatButton("View logs", size: 14)
     private let settingsRule = AppWindow.rule()
     private let about = AppWindow.label("About", size: 15)
     private let credit = AppWindow.label("Created by Nikhil Sharma with assistance from OpenAI’s ChatGPT models.", size: 13)
@@ -60,6 +63,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private let license = AppWindow.label("Open source · MIT License", size: 13)
     private var cachedRecents: [Int]?
     private var showingSettings = false
+    private var showingLogs = false
     private var warningSheet: NSWindow?
     private var layoutObservers: [NSObjectProtocol] = []
     private var hoverMonitor: Any?
@@ -110,18 +114,21 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         hoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .leftMouseDragged]) { [weak self] event in
             if let self, event.window === self.window {
                 let point = self.macLock.convert(event.locationInWindow, from: nil)
-                self.macLock.setPointerInside(!self.showingSettings && self.macLock.bounds.contains(point))
+                self.macLock.setPointerInside(!self.showingSettings && !self.showingLogs && self.macLock.bounds.contains(point))
             }
             return event
         }
-        navigation.onClick = { [weak self] in guard let self else { return }; self.showSettings(!self.showingSettings) }
-        for (view, id) in [(brand, "title"), (cat, "cat"), (navigation, "navigation"), (main, "main-page"), (settings, "settings-page")] as [(NSView, String)] {
+        navigation.onClick = { [weak self] in
+            guard let self else { return }
+            self.showSettings(self.showingLogs || !self.showingSettings)
+        }
+        for (view, id) in [(brand, "title"), (cat, "cat"), (navigation, "navigation"), (main, "main-page"), (settings, "settings-page"), (logs, "logs-page")] as [(NSView, String)] {
             view.identifier = NSUserInterfaceItemIdentifier(id); root.addSubview(view)
         }
         for (view, id) in [(title, "duration"), (time, "time"), (slider, "slider"), (minus, "minus"), (plus, "plus"), (recentTitle, "history-label"), (recent, "history"), (recentEmpty, "history-empty"), (mainRule, "main-rule"), (mac, "mac-checkbox"), (macLock, "mac-lock"), (screen, "screen-checkbox"), (battery, "battery"), (notice, "notice"), (start, "action"), (extend, "extend")] as [(NSView, String)] {
             view.identifier = NSUserInterfaceItemIdentifier(id); main.addSubview(view)
         }
-        for (view, id) in [(login, "login-checkbox"), (loginNote, "login-note"), (approval, "login-approval"), (settingsRule, "settings-rule"), (about, "about"), (credit, "credit"), (inspiration, "inspiration"), (version, "version"), (license, "license")] as [(NSView, String)] {
+        for (view, id) in [(login, "login-checkbox"), (loginNote, "login-note"), (approval, "login-approval"), (viewLogs, "view-logs"), (settingsRule, "settings-rule"), (about, "about"), (credit, "credit"), (inspiration, "inspiration"), (version, "version"), (license, "license")] as [(NSView, String)] {
             view.identifier = NSUserInterfaceItemIdentifier(id); settings.addSubview(view)
         }
         lockHint.identifier = NSUserInterfaceItemIdentifier("lock-hint")
@@ -140,10 +147,12 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         extend.onClick = { [weak self] in self?.onExtend?() }
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.2"
-        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-16"
+        viewLogs.onClick = { [weak self] in self?.showLogs() }
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
+        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-17"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
+        logs.isHidden = true
     }
 
     // Every state occupies the same slots. Hidden controls never move the footer.
@@ -163,6 +172,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         navigation.frame = NSRect(x: w - inset - 86, y: headerBottom - 30, width: 86, height: 30)
         main.frame = NSRect(x: inset, y: 62, width: available, height: h - 78)
         settings.frame = main.frame
+        logs.frame = main.frame
         title.frame = NSRect(x: 0, y: 0, width: available - 100, height: 23)
         time.frame = NSRect(x: available - 96, y: 0, width: 96, height: 23)
         minus.frame = NSRect(x: 0, y: 31, width: 40, height: 32)
@@ -183,13 +193,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         lockHint.frame = NSRect(x: max(inset, min(w - inset - hintSize.width, lockFrame.midX - hintSize.width / 2)),
                                 y: lockFrame.minY - hintSize.height - 5, width: hintSize.width, height: hintSize.height)
         screen.frame = NSRect(x: 0, y: 152, width: available, height: 27)
-        battery.frame = NSRect(x: 0, y: 211, width: available - 94, height: 20)
-        extend.frame = NSRect(x: available - 86, y: 204, width: 86, height: 30)
-        notice.frame = NSRect(x: 0, y: 239, width: available, height: 41)
+        battery.frame = NSRect(x: 0, y: 199, width: available - 94, height: 20)
+        extend.frame = NSRect(x: available - 86, y: 192, width: 86, height: 30)
+        // Some regional date formats need a third line after a detection label.
+        // Reserve it without moving the Start/Stop footer or reducing the font.
+        notice.frame = NSRect(x: 0, y: 227, width: available, height: 53)
         start.frame = NSRect(x: 0, y: main.bounds.height - 40, width: available, height: 40)
         login.frame = NSRect(x: 0, y: 0, width: available, height: 28)
         loginNote.frame = NSRect(x: 0, y: 39, width: available, height: 42)
         approval.frame = NSRect(x: 0, y: 90, width: 184, height: 32)
+        viewLogs.frame = NSRect(x: available - 110, y: 90, width: 110, height: 32)
         settingsRule.frame = NSRect(x: 0, y: 126, width: available, height: 1)
         about.frame = NSRect(x: 0, y: 143, width: available, height: 23)
         credit.frame = NSRect(x: 0, y: 172, width: available, height: 44)
@@ -255,12 +268,22 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     }
     func cancelWarning() { if let panel = warningSheet { window?.endSheet(panel, returnCode: .cancel); warningSheet = nil } }
     func setLockHintVisible(_ visible: Bool) {
-        lockHint.isHidden = !visible || showingSettings
+        lockHint.isHidden = !visible || showingSettings || showingLogs
     }
     private func hideLockHint() { macLock.resetHover(); lockHint.isHidden = true }
     func windowDidResignKey(_ notification: Notification) { hideLockHint() }
     func windowWillClose(_ notification: Notification) { hideLockHint() }
-    func showSettings(_ show: Bool) { hideLockHint(); showingSettings = show; main.isHidden = show; settings.isHidden = !show; navigation.title = show ? "Back" : "Settings"; layoutContent() }
+    func showSettings(_ show: Bool) {
+        hideLockHint(); showingSettings = show; showingLogs = false
+        main.isHidden = show; settings.isHidden = !show; logs.isHidden = true
+        navigation.title = show ? "Back" : "Settings"; layoutContent()
+    }
+    func showLogs() {
+        hideLockHint(); showingSettings = false; showingLogs = true
+        main.isHidden = true; settings.isHidden = true; logs.isHidden = false
+        navigation.title = "Back"; layoutContent(); onViewLogs?(); logs.scrollToNewest()
+    }
+    func renderLogs(events: [AuditEvent], error: String?) { logs.render(events: events, error: error) }
     @objc private func sliderChanged() { onDuration?(Int((slider.doubleValue / 15).rounded()) * 15) }
     @objc private func screenChanged() { onScreen?(screen.state == .on) }
     @objc private func loginChanged() { onLogin?(login.state == .on) }
@@ -314,8 +337,9 @@ final class FlatButton: NSButton {
     var onClick: (() -> Void)?
     private var primary = false
     private var soft = false
-    init(_ title: String, size: CGFloat = 15, primary: Bool = false, soft: Bool = false) {
-        super.init(frame: .zero); self.primary = primary; self.soft = soft; self.title = title
+    private var dimWhenDisabled = false
+    init(_ title: String, size: CGFloat = 15, primary: Bool = false, soft: Bool = false, dimWhenDisabled: Bool = false) {
+        super.init(frame: .zero); self.primary = primary; self.soft = soft; self.dimWhenDisabled = dimWhenDisabled; self.title = title
         font = AppWindow.font(size); isBordered = false; bezelStyle = .regularSquare
         target = self; action = #selector(invoke); focusRingType = .default
         setButtonType(.momentaryPushIn)
@@ -335,8 +359,9 @@ final class FlatButton: NSButton {
         AppPalette.foreground.withAlphaComponent(soft ? (isEnabled ? 0.06 : 0.025) : alpha).setFill()
         let radius: CGFloat = soft ? bounds.height / 2 : 8
         let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius); shape.fill()
-        AppPalette.foreground.withAlphaComponent(soft ? (isEnabled ? 0.55 : 0.30) : (isEnabled ? 0.85 : 0.35)).setStroke(); shape.lineWidth = 1; shape.stroke()
-        let attrs: [NSAttributedString.Key: Any] = [.font: font ?? AppWindow.font(15), .foregroundColor: AppPalette.foreground]
+        AppPalette.foreground.withAlphaComponent(soft ? (isEnabled ? 0.55 : (dimWhenDisabled ? 0.20 : 0.30)) : (isEnabled ? 0.85 : 0.35)).setStroke(); shape.lineWidth = 1; shape.stroke()
+        let titleColor = AppPalette.foreground.withAlphaComponent(!isEnabled && dimWhenDisabled ? 0.30 : 1)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font ?? AppWindow.font(15), .foregroundColor: titleColor]
         let text = NSAttributedString(string: title, attributes: attrs)
         if let context = NSGraphicsContext.current?.cgContext {
             let line = CTLineCreateWithAttributedString(text)
@@ -351,7 +376,7 @@ final class FlatButton: NSButton {
             context.restoreGState()
         }
     }
-    @objc private func invoke() { onClick?() }
+    @objc private func invoke() { guard isEnabled else { return }; onClick?() }
 }
 private final class WarningPanel: NSPanel {
     var onCancel: (() -> Void)?

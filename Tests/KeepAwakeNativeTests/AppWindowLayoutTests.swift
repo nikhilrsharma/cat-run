@@ -570,7 +570,7 @@ final class AppWindowLayoutTests: XCTestCase {
     private func assertControlsFit(_ root: NSView, context: String,
                                    file: StaticString = #filePath, line: UInt = #line) throws {
         let views = descendants(root)
-        XCTAssertFalse(views.contains { $0 is NSScrollView }, "Unexpected scrolling: \(context)", file: file, line: line)
+        XCTAssertFalse(views.contains { $0 is NSScrollView && !$0.isHiddenOrHasHiddenAncestor }, "Unexpected scrolling: \(context)", file: file, line: line)
         let controls = views.compactMap { $0 as? NSControl }.filter { !$0.isHiddenOrHasHiddenAncestor }
         for control in controls {
             let name = control.identifier?.rawValue ?? String(describing: type(of: control))
