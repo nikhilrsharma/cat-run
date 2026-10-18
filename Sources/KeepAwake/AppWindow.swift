@@ -54,7 +54,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private let login = CatCheckbox("Launch at login")
     private let loginNote = AppWindow.label("", size: 13)
     private let approval = FlatButton("Open Login Settings", size: 14)
-    private let viewLogs = FlatButton("View logs", size: 14)
+    private let viewLogs = FlatButton("View logs", size: 13)
     private let settingsRule = AppWindow.rule()
     private let about = AppWindow.label("About", size: 15)
     private let credit = AppWindow.label("Created by Nikhil Sharma with assistance from OpenAI’s ChatGPT models.", size: 13)
@@ -148,7 +148,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
         viewLogs.onClick = { [weak self] in self?.showLogs() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1"
         let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-17"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
@@ -199,10 +199,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         // Reserve it without moving the Start/Stop footer or reducing the font.
         notice.frame = NSRect(x: 0, y: 227, width: available, height: 53)
         start.frame = NSRect(x: 0, y: main.bounds.height - 40, width: available, height: 40)
-        login.frame = NSRect(x: 0, y: 0, width: available, height: 28)
+        login.frame = NSRect(x: 0, y: 0, width: available - 100, height: 30)
         loginNote.frame = NSRect(x: 0, y: 39, width: available, height: 42)
         approval.frame = NSRect(x: 0, y: 90, width: 184, height: 32)
-        viewLogs.frame = NSRect(x: available - 110, y: 90, width: 110, height: 32)
+        viewLogs.frame = NSRect(x: available - 86, y: login.frame.midY - 15, width: 86, height: 30)
         settingsRule.frame = NSRect(x: 0, y: 126, width: available, height: 1)
         about.frame = NSRect(x: 0, y: 143, width: available, height: 23)
         credit.frame = NSRect(x: 0, y: 172, width: available, height: 44)

@@ -4,6 +4,8 @@ A small native macOS menu bar utility that keeps a Mac awake for a chosen time. 
 
 Inspired by Caffeine by Dominic Rodemer.
 
+Version 0.3.1 places View logs directly beneath Back, centered on the Launch at login row, with matching button size.
+
 Version 0.3.0 adds a concise reason whenever a timer stops, an encrypted seven-day activity history in Settings, and visibly faded duration controls while a timer runs. Logs use date-only separators and show the most recently recorded activity first.
 
 Earlier releases corrected the unavailable-forecast warning after unplugging, strengthened interruption handling, and fixed clipping around the duration slider and script wordmark. An unavailable battery-runtime estimate means **unknown**, not that the battery is predicted to fall below 15%; it does not require confirmation when the actual charge reading is valid.

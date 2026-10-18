@@ -1,8 +1,16 @@
-# Cat Run 0.3.0 validation
+# Cat Run 0.3.1 validation
 
 Checked October 17, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Moved View logs directly beneath Back, matching its 86×30-point size and 13-point button text. The button shares the vertical center of Launch at login; the checkbox has its own width and a 14-point gap before the button. Both controls remain fully inside the Settings page.
+- All 24 existing focused layout tests passed, including min/max Settings states, login errors/approval states, logs navigation and text fitting. No timer, encryption, battery, or logging behavior changed; the complete 254-test run below describes 0.3.0.
+
+- Visually checked four isolated Settings/approval renders at minimum and maximum sizes, then confirmed the installed layout and logs navigation. Version 0.3.1/build 16 preserves the saved 75-minute duration, 75/165/15-minute history, screen-awake choice, enabled login setting, last stop time, and prior encrypted activity. macOS requested access to Cat Run's own Keychain key after the local signature changed; the user completed that prompt and the existing history opened successfully. The app remains inactive, with Settings visible.
+- Installed and packaged bundles passed strict signature verification and matched the build byte for byte. App Sandbox remains the only entitlement and hardened runtime remains enabled. Source privacy checks found no personal paths or contact details in the changed files; binaries, keys, history, and local test artifacts stay outside the public repository.
+
+## Checks retained from 0.3.0
 
 - All **254 tests passed**: 129 native and 125 core. New coverage includes authenticated encryption, missing/wrong keys, tampering, bounded reads, seven-day retention, event caps and deduplication, clock rollback, unsafe filesystem objects, interrupted writes, legacy journal migration, quarantine age/count limits, crash recovery wording, logging failure recovery, and bounded quit flushing. Run-marker renewal is checked when retention removes the opening entry during a long-running app session.
 - Every stop reason has distinct concise wording. Known stop times use local date/time/timezone; unrecorded interruptions do not invent a cause or end time. Missed-sleep recovery distinguishes detection from the actual stop instant. Tests cover known, missing, unknown future, and restored outcomes as well as the safety guard's stop ordering.

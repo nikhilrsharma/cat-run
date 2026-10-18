@@ -1,6 +1,6 @@
 # Cat Run product requirements
 
-Version 0.3.0 · Updated October 17, 2026
+Version 0.3.1 · Updated October 17, 2026
 
 Cat Run is a small native macOS utility for keeping a Mac awake for a chosen duration. It is created by Nikhil Sharma with assistance from OpenAI’s ChatGPT models, inspired by Caffeine by Dominic Rodemer, and published as open source under the MIT licence.
 
@@ -46,7 +46,7 @@ Cat Run is a small native macOS utility for keeping a Mac awake for a chosen dur
 
 ## Activity history
 
-- Add **View logs** in Settings. Open an Activity page inside the existing window without changing its size or aspect ratio. **Back** returns to Settings; another Back returns to the main screen. Logs remain available while a timer runs.
+- Place **View logs** directly beneath Back in Settings, with matching button width and height, centered vertically on the Launch at login row. Reserve separate horizontal space for the checkbox and button at both window limits. Open an Activity page inside the existing window without changing its size or aspect ratio. **Back** returns to Settings; another Back returns to the main screen. Logs remain available while a timer runs.
 - Show concise entries with the most recently recorded activity first. Preserve recording order when the wall clock moves; do not reorder the sequence of actions by their displayed timestamp. Start each local calendar day with a clear date-only separator and thin rule, using regional formatting. Never label headings Today or Yesterday. Keep the current date heading visible while scrolling; repeat a date heading if a clock correction changes the day sequence.
 - Each row shows local hours, minutes, seconds, and timezone plus one short description. Seconds aid auditing and do not change the hours/minutes-only timer or stop notice. Resize rows to fit their text at both window limits, with a visible vertical scrollbar and no overlap.
 - Record app opening/normal exit/detected unrecorded exit; timer start, extension, stop and reason; warnings, warning choices, blocked actions and failures; observed sleep/wake and user-session changes; power connection changes; and duration, keep-screen-awake, and login-setting changes. Do not record countdown ticks, regular battery checks, or animation frames.
