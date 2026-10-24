@@ -446,6 +446,149 @@ final class AppWindowLayoutTests: XCTestCase {
         }
     }
 
+    func testExtensionLimitIsExplainedDisabledAndFitsAtBothWindowLimits() throws {
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let root = try XCTUnwrap(controller.window?.contentView)
+            let extend = try XCTUnwrap(descendants(root).compactMap { $0 as? FlatButton }.first {
+                $0.identifier?.rawValue == "extend"
+            })
+            var requests = 0
+            controller.onExtend = { requests += 1 }
+            var state = WindowState()
+            state.active = true; state.duration = 180; state.remaining = 14_160
+            for screen in screenFrames {
+                for fraction in [0.0, 1.0] {
+                    state.canExtend = true
+                    controller.render(state)
+                    resize(controller, screen: screen, fraction: fraction)
+                    let originalFrame = extend.frame
+                    XCTAssertEqual(extend.title, "+15m")
+                    XCTAssertTrue(extend.isEnabled)
+                    let enabledBrightness = try titleBrightness(extend)
+                    state.canExtend = false
+                    controller.render(state)
+                    XCTAssertEqual(extend.title, "06h limit")
+                    XCTAssertEqual(extend.frame, originalFrame)
+                    XCTAssertFalse(extend.isEnabled)
+                    XCTAssertEqual(extend.toolTip, "Six-hour session limit reached, including time already elapsed.")
+                    XCTAssertEqual(extend.accessibilityHelp(), extend.toolTip)
+                    XCTAssertEqual(extend.accessibilityLabel(), "Six-hour session limit reached")
+                    let disabledBrightness = try titleBrightness(extend)
+                    XCTAssertLessThan(disabledBrightness, enabledBrightness * 0.45)
+                    extend.performClick(nil)
+                    extend.highlight(true)
+                    XCTAssertEqual(try titleBrightness(extend), disabledBrightness, accuracy: 0.02)
+                    extend.highlight(false)
+                    try assertControlsFit(controller, context: "six-hour extension limit")
+                }
+            }
+            XCTAssertEqual(requests, 0, "A capped session must never request an extension")
+        }
+    }
+
+    func testActiveSliderShowsRemainingTimeBelowFifteenMinutesAndRestoresIdleTicks() throws {
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let root = try XCTUnwrap(controller.window?.contentView)
+            let slider = try XCTUnwrap(descendants(root).compactMap { $0 as? NSSlider }.first)
+            let cell = try XCTUnwrap(slider.cell as? SmoothSliderCell)
+            var state = WindowState()
+            state.duration = 180; state.active = true
+            for fraction in [0.0, 1.0] {
+                resize(controller, screen: screenFrames[0], fraction: fraction)
+                for remaining in [21_600.0, 14_160, 899, 59, 1, 0] {
+                    state.remaining = remaining
+                    controller.render(state)
+                    XCTAssertFalse(slider.isEnabled)
+                    XCTAssertEqual(slider.minValue, 0)
+                    XCTAssertEqual(slider.maxValue, 360)
+                    XCTAssertEqual(slider.numberOfTickMarks, 0)
+                    XCTAssertFalse(slider.allowsTickMarkValuesOnly)
+                    XCTAssertEqual(slider.doubleValue, remaining / 60, accuracy: 0.0001)
+                    XCTAssertEqual(slider.accessibilityLabel(), "Remaining time in minutes")
+                    let track = cell.barRect(flipped: slider.isFlipped)
+                    let thumb = cell.knobRect(flipped: slider.isFlipped)
+                    XCTAssertTrue(slider.bounds.contains(thumb), "Remaining-time thumb must not clip at either end")
+                    XCTAssertEqual(thumb.midX, track.minX + CGFloat(remaining / 21_600) * track.width, accuracy: 0.01)
+                }
+            }
+            state.active = false
+            controller.render(state)
+            XCTAssertTrue(slider.isEnabled)
+            XCTAssertEqual(slider.minValue, 15)
+            XCTAssertEqual(slider.numberOfTickMarks, 24)
+            XCTAssertTrue(slider.allowsTickMarkValuesOnly)
+            XCTAssertEqual(slider.doubleValue, 180)
+            XCTAssertEqual(slider.accessibilityLabel(), "Duration in minutes")
+        }
+    }
+
+    func testWarningRefreshKeepsButtonsAndUpdatesExtensionWordingWithoutAnAction() throws {
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let panel = controller.makeWarningPanel(ForecastWarning.estimatedBelowMinimum(projectedPercent: 14).message,
+                                                    isExtension: true)
+            let root = try XCTUnwrap(panel.contentView)
+            let message = try XCTUnwrap(descendants(root).compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "warning-message"
+            })
+            let proceed = try XCTUnwrap(descendants(root).compactMap { $0 as? FlatButton }.first {
+                $0.identifier?.rawValue == "warning-continue"
+            })
+            let cancel = try XCTUnwrap(descendants(root).compactMap { $0 as? FlatButton }.first { $0.title == "Cancel" })
+            root.layoutSubtreeIfNeeded()
+            let panelFrame = panel.frame
+            let proceedFrame = proceed.convert(proceed.bounds, to: root)
+            let cancelFrame = cancel.convert(cancel.bounds, to: root)
+            var accepted = 0
+            proceed.onClick = { accepted += 1 }
+            let updates = [
+                ForecastWarning.estimatedBelowMinimum(projectedPercent: 0).message,
+                "Your Mac is now plugged in. Add 15 minutes? The timer still stops if actual charge falls below 15%.",
+                "The battery forecast is currently unavailable. Add 15 minutes? The timer still stops if actual charge falls below 15%."
+            ]
+            for text in updates {
+                panel.update(message: text, isExtension: true)
+                XCTAssertEqual(message.stringValue, text)
+                XCTAssertEqual(panel.frame, panelFrame, "Refreshing a warning must not reopen or resize it")
+                XCTAssertEqual(proceed.convert(proceed.bounds, to: root), proceedFrame,
+                               "A live forecast update must not move Continue under the pointer")
+                XCTAssertEqual(cancel.convert(cancel.bounds, to: root), cancelFrame,
+                               "A live forecast update must not move Cancel under the pointer")
+                XCTAssertTrue(descendants(root).contains { $0 === proceed })
+                XCTAssertTrue(descendants(root).contains { $0 === cancel })
+                XCTAssertEqual(proceed.toolTip, "Add 15 minutes; automatic protection below 15% remains active.")
+                XCTAssertEqual(cancel.keyEquivalent, "\r", "Return should never accidentally accept an extension")
+                try assertControlsFit(root, context: "updated extension warning")
+            }
+            panel.update(message: updates[0], isExtension: false)
+            XCTAssertEqual(proceed.convert(proceed.bounds, to: root), proceedFrame)
+            XCTAssertEqual(cancel.convert(cancel.bounds, to: root), cancelFrame)
+            XCTAssertEqual(proceed.toolTip, "Start with automatic protection below 15%.")
+            XCTAssertEqual(accepted, 0, "A forecast or power update must not accept the warning")
+        }
+    }
+
+    private func titleBrightness(_ button: FlatButton) throws -> CGFloat {
+        let bitmap = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+        button.cacheDisplay(in: button.bounds, to: bitmap)
+        let scaleX = CGFloat(bitmap.pixelsWide) / button.bounds.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / button.bounds.height
+        let title = button.visibleTitleBounds.insetBy(dx: -1, dy: -1)
+        var peak: CGFloat = 0
+        for y in max(0, Int(title.minY * scaleY))..<min(bitmap.pixelsHigh, Int(ceil(title.maxY * scaleY))) {
+            for x in max(0, Int(title.minX * scaleX))..<min(bitmap.pixelsWide, Int(ceil(title.maxX * scaleX))) {
+                let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                peak = max(peak, color.redComponent * color.alphaComponent)
+            }
+        }
+        return peak
+    }
+
     private var screenFrames: [NSRect] {
         [NSRect(x: 0, y: 25, width: 1440, height: 875),
          NSRect(x: -1024, y: 25, width: 1024, height: 700),

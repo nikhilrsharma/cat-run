@@ -7,7 +7,15 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         case date(String)
         case event(AuditEvent)
     }
+    var onCopyRequested: ((@escaping ([AuditEvent], String?) -> Void) -> Void)?
+    private let pasteboard: NSPasteboard
     private let heading = AuditLogView.label("Activity", size: 15)
+    private let copy = FlatButton("Copy logs", size: 13, dimWhenDisabled: true)
+    private var copyRequest: UUID?
+    private var feedbackReset: DispatchWorkItem?
+    private var logsAvailable = false
+    private var locale = Locale.current
+    private var timeZone = TimeZone.current
     private let empty = AuditLogView.label("No activity logged yet.", size: 13)
     private let scroll = NSScrollView()
     private let table = NSTableView()
@@ -15,11 +23,19 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
     private var rows: [Row] = []
     private var events: [AuditEvent] = []
     private var lastColumnWidth: CGFloat = 0
+    private var maximumTimestampWidth: CGFloat = 0
     private var formatContext = ""
     private var timeFormatter = DateFormatter()
 
-    override init(frame frameRect: NSRect) {
+    override convenience init(frame frameRect: NSRect) {
+        self.init(frame: frameRect, pasteboard: .general)
+    }
+    init(frame frameRect: NSRect, pasteboard: NSPasteboard) {
+        self.pasteboard = pasteboard
         super.init(frame: frameRect)
+        copy.identifier = NSUserInterfaceItemIdentifier("copy-logs")
+        copy.toolTip = "Copy all retained activity as text."
+        copy.onClick = { [weak self] in self?.requestCopy() }
         heading.identifier = NSUserInterfaceItemIdentifier("logs-heading")
         empty.identifier = NSUserInterfaceItemIdentifier("logs-empty")
         scroll.identifier = NSUserInterfaceItemIdentifier("logs-scroll")
@@ -53,10 +69,40 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         table.delegate = self
         table.dataSource = self
         scroll.documentView = table
-        [heading, scroll, empty].forEach(addSubview)
+        [heading, copy, scroll, empty].forEach(addSubview)
         render(events: [], error: nil)
     }
     required init?(coder: NSCoder) { fatalError("Not used") }
+    deinit { feedbackReset?.cancel() }
+
+    private func requestCopy() {
+        guard copyRequest == nil, logsAvailable, !events.isEmpty else { return }
+        feedbackReset?.cancel()
+        let request = UUID()
+        copyRequest = request
+        copy.title = "Copying…"
+        copy.isEnabled = false
+        let completion: ([AuditEvent], String?) -> Void = { [weak self] events, error in
+            guard let self, self.copyRequest == request else { return }
+            self.copyRequest = nil
+            self.render(events: events, error: error, locale: self.locale, timeZone: self.timeZone)
+            guard error == nil, !events.isEmpty else {
+                self.copy.title = "Copy logs"
+                return
+            }
+            let text = AuditLogText.string(events: events, locale: self.locale, timeZone: self.timeZone)
+            self.copy.title = AuditClipboard.copy(text, to: self.pasteboard) ? "Copied" : "Try again"
+            self.copy.toolTip = self.copy.title == "Copied" ? "All retained activity was copied." : "Could not copy activity. Try again."
+            let reset = DispatchWorkItem { [weak self] in
+                self?.copy.title = "Copy logs"
+                self?.copy.toolTip = "Copy all retained activity as text."
+            }
+            self.feedbackReset = reset
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reset)
+        }
+        if let onCopyRequested { onCopyRequested(completion) }
+        else { completion(events, nil) }
+    }
 
     func scrollToNewest() {
         scroll.contentView.scroll(to: .zero)
@@ -65,6 +111,10 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
 
     func render(events: [AuditEvent], error: String?, locale: Locale = .current,
                 timeZone: TimeZone = .current) {
+        self.locale = locale
+        self.timeZone = timeZone
+        logsAvailable = error == nil
+        copy.isEnabled = logsAvailable && !events.isEmpty && copyRequest == nil
         let newContext = "\(locale.identifier)|\(timeZone.identifier)"
         let changedContext = formatContext != newContext
         formatContext = newContext
@@ -77,6 +127,7 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         // must not reorder what happened; a repeated date heading is intentional.
         if changedContext || events.map(\.id) != self.events.map(\.id) || error != nil {
             self.events = events
+            maximumTimestampWidth = events.map { AuditLogRow.measuredTimeWidth(timeFormatter.string(from: $0.date)) }.max() ?? 0
             rows.removeAll(keepingCapacity: true)
             var calendar = Calendar(identifier: .gregorian)
             calendar.locale = locale
@@ -105,7 +156,8 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
 
     override func layout() {
         super.layout()
-        heading.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 23)
+        heading.frame = NSRect(x: 0, y: 3, width: max(0, bounds.width - 100), height: 23)
+        copy.frame = NSRect(x: bounds.width - 86, y: 0, width: 86, height: 30)
         scroll.frame = NSRect(x: 0, y: 34, width: bounds.width, height: max(0, bounds.height - 34))
         empty.frame = NSRect(x: 0, y: 42, width: bounds.width,
                              height: max(0, bounds.height - 42))
@@ -120,6 +172,12 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
         }
     }
 
+    private var timestampWidth: CGFloat {
+        // One column width for the entire snapshot, including a DST transition.
+        // Leave room for the message even with a long localized zone label.
+        min(maximumTimestampWidth, max(1, column.width * 0.5))
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
     func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
@@ -128,9 +186,9 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
     }
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         switch rows[row] {
-        case .date: return 34
+        case .date: return 26
         case .event(let event):
-            return AuditLogRow.height(time: timeFormatter.string(from: event.date), message: event.message, width: column.width)
+            return AuditLogRow.height(time: timeFormatter.string(from: event.date), message: event.message, width: column.width, timeWidth: timestampWidth)
         }
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -144,7 +202,7 @@ final class AuditLogView: FlippedView, NSTableViewDataSource, NSTableViewDelegat
             let id = NSUserInterfaceItemIdentifier("log-event")
             let view = table.makeView(withIdentifier: id, owner: self) as? AuditLogRow ?? AuditLogRow()
             view.identifier = id
-            view.set(time: timeFormatter.string(from: event.date), message: event.message)
+            view.set(time: timeFormatter.string(from: event.date), message: event.message, timeWidth: timestampWidth)
             return view
         }
     }
@@ -174,7 +232,7 @@ private final class AuditDateHeader: FlippedView {
     func setTitle(_ text: String) { label.stringValue = text }
     override func layout() {
         super.layout()
-        label.frame = NSRect(x: 0, y: 7, width: bounds.width - 6, height: 21)
+        label.frame = NSRect(x: 0, y: 2, width: bounds.width - 6, height: 21)
     }
     override func draw(_ dirtyRect: NSRect) {
         AppPalette.background.setFill(); bounds.fill()
@@ -186,9 +244,14 @@ private final class AuditDateHeader: FlippedView {
 private final class AuditLogRow: FlippedView {
     private let time = AuditLogView.label("", size: 13)
     private let message = AuditLogView.label("", size: 13)
-    private static let timeWidth: CGFloat = 106
-    private static let gap: CGFloat = 10
-    private static let verticalPadding: CGFloat = 9
+    private static let gap: CGFloat = 8
+    private static let verticalPadding: CGFloat = 3
+    private var timestampWidth: CGFloat = 0
+    static func measuredTimeWidth(_ time: String) -> CGFloat {
+        // Keep the timestamp and its timezone on one line instead of forcing
+        // every short entry to inherit a second line of height.
+        ceil((time as NSString).size(withAttributes: [.font: AppWindow.font(13)]).width) + 8
+    }
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         time.identifier = NSUserInterfaceItemIdentifier("log-time")
@@ -196,24 +259,27 @@ private final class AuditLogRow: FlippedView {
         addSubview(time); addSubview(message)
     }
     required init?(coder: NSCoder) { fatalError("Not used") }
-    func set(time: String, message: String) {
+    func set(time: String, message: String, timeWidth: CGFloat) {
         self.time.stringValue = time
         self.message.stringValue = message
+        self.timestampWidth = timeWidth
+        needsLayout = true
     }
-    static func height(time: String, message: String, width: CGFloat) -> CGFloat {
+    static func height(time: String, message: String, width: CGFloat, timeWidth: CGFloat) -> CGFloat {
         let available = max(1, width - timeWidth - gap - 6)
         func measured(_ text: String, width: CGFloat) -> CGFloat {
             let bounds = (text as NSString).boundingRect(with: NSSize(width: max(1, width - 4), height: 100_000),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: AppWindow.font(13)])
             return ceil(bounds.height) + 2
         }
-        return max(24, max(measured(message, width: available), measured(time, width: timeWidth))) + verticalPadding * 2
+        return max(20, max(measured(message, width: available), measured(time, width: timeWidth))) + verticalPadding * 2
     }
     override func layout() {
         super.layout()
-        time.frame = NSRect(x: 0, y: Self.verticalPadding, width: Self.timeWidth, height: bounds.height - Self.verticalPadding * 2)
-        message.frame = NSRect(x: Self.timeWidth + Self.gap, y: Self.verticalPadding,
-                               width: max(1, bounds.width - Self.timeWidth - Self.gap - 6),
+        let timeWidth = timestampWidth
+        time.frame = NSRect(x: 0, y: Self.verticalPadding, width: timeWidth, height: bounds.height - Self.verticalPadding * 2)
+        message.frame = NSRect(x: timeWidth + Self.gap, y: Self.verticalPadding,
+                               width: max(1, bounds.width - timeWidth - Self.gap - 6),
                                height: bounds.height - Self.verticalPadding * 2)
     }
 }

@@ -1,8 +1,18 @@
-# Cat Run 0.3.2 validation
+# Cat Run 0.3.3 validation
 
-Checked October 18, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
+Checked October 24, 2026 on an Apple Silicon Mac running macOS 27.0.1. The build targets macOS 13 or later; older supported versions and Intel hardware have not been exercised here.
 
 ## Current revision
+
+- Clarified the six-hour total-session cap with a disabled “06h limit” label and explanation. The active bar reflects remaining time, including the final minutes; idle duration selection retains its 15-minute steps. Open warning text refreshes as battery conditions change and never automatically accepts an extension.
+- A fresh unsafe interface battery reading is now passed to the independent guard before another reader can override it. The request flow checks both readers, stop events, session identity, and one-shot warning confirmation before preparing a change. Existing deadline, sleep, heartbeat, lease, AC cutoff, and six-hour policies remain in force.
+- All **290 tests passed**: 162 native and 128 core. New request-flow cases cover disagreeing readers, rapid additions to the cap, exact 15%, AC/unknown charge, waiting/cancelling/repeating confirmations, stale callbacks, expiry and missed-sleep priority. Clipboard tests use a named test pasteboard; they do not read or replace the user's general clipboard. Export tests include all 4,000 retained entries, offscreen rows, fresh queued writes, unavailable/empty logs, recording order, and the repeated daylight-saving hour.
+- Activity keeps 13-point text with tighter rows and date headings, and a common measured timestamp column. Copy logs waits for a fresh verified snapshot and current retention before copying all retained entries as plain text. No clipboard contents are read, and empty or unavailable data does not replace them. A final OS clipboard-write failure reports failure; the pasteboard API is not transactional.
+- Visually reviewed 22 production-view renders at minimum and maximum bounds, covering the cap with time already elapsed, last-minute and full-range bars, Settings, compact/scrolled/multiple-day/long-timezone logs, and empty/unavailable histories. Four warning updates were also reviewed. The first render exposed moving warning buttons; a fixed message area now preserves Cancel/Continue positions across all updates, with all 20 focused window-layout tests passing afterward. These are isolated AppKit renders using simulated display bounds, not measurements on multiple physical monitors.
+- Built and packaged **0.3.3/build 18**. The extracted archive matches all four build-bundle files and passes strict signature verification; App Sandbox is the only entitlement and hardened runtime is enabled. The prior local package is backed up. All 64 publication files passed the privacy scan, and the stripped executable contains no personal home-directory path. Generated previews, logs, caches, binaries, user records, and keys are excluded from public source. This remains a local ad-hoc build, not a notarized public binary.
+- The hardware checks retained below are release-specific evidence. This revision's battery/error scenarios use controlled clocks, readers, and power-service doubles; physical depletion, real sleep/shutdown, and crashes were not induced in the user's active session.
+
+## Checks retained from 0.3.2
 
 - Separated periodic battery reads from the existing safety cadence: a 30-second active-only fallback supplies fresh charge, while the guard retains its 10-second timing and lease checks. Start, extension, power-source notifications, and activation/wake paths still request fresh readings without waiting for the fallback.
 - Removed the “Local time” label from Activity. Recorded timestamps continue to show local time and timezone; the date groups and logs navigation are unchanged.

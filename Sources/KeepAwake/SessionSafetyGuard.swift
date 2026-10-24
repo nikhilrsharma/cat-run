@@ -274,6 +274,17 @@ final class SessionSafetyGuard {
         synchronized { check(renewLease: renewLease) }
     }
 
+    /// Fresh evidence from the interface reader must not be discarded just
+    /// because this queue's separate reader returned a different snapshot.
+    func observeBattery(_ reading: BatteryReading, token: UUID?) {
+        synchronized {
+            guard let active = session, active.token == token,
+                  let batteryReason = batteryStopReason(reading) else { return }
+            let now = clock()
+            terminate(timingStopReason(for: active, at: now) ?? batteryReason, at: now)
+        }
+    }
+
     /// Periodic safety and lease work stays frequent; only scheduled battery
     /// sampling is throttled. Explicit observations always use checkNow instead.
     func checkScheduled() {

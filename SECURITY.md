@@ -1,6 +1,6 @@
 # Security and release verification
 
-Version 0.3.2 · Updated October 18, 2026
+Version 0.3.3 · Updated October 24, 2026
 
 ## Permissions and data
 
@@ -17,6 +17,8 @@ Activity logs and the latest-session record use CryptoKit AES-GCM with a 256-bit
 Missing, inaccessible, or invalid keys do not trigger a plaintext fallback. When existing encrypted data is present or its location cannot be inspected safely, Cat Run refuses to generate a replacement key. Unreadable or unauthenticated history is reported as unavailable and is not silently replaced. Key access is cached in memory after success. A temporary failure may recover when Keychain access becomes available; a lost key cannot be reconstructed from the encrypted files. The latest-session record must be saved before a timer starts, so failure to save that safety marker prevents activation.
 
 The activity store keeps a rolling seven days of entries, newest recorded first, with an additional limit of 4,000 events and a 2 MiB encrypted file. Event descriptions are bounded, single-line, app-owned text. Routine countdown ticks, animation frames, and battery polling are not logged. Recording order remains stable across wall-clock changes, and an authenticated retention reference prevents a backward clock correction from restoring already expired entries. Entries may be removed earlier if the count limit is reached.
+
+**Copy logs** writes the available retained verified activity to the clipboard only after an explicit click. It includes offscreen entries in recording order with date groups and local timestamps. This user-requested copy is plaintext for pasting into another application; the on-disk history and key remain encrypted and are not exported. Empty or unavailable history cannot be copied. No automatic copying, plaintext export file, new entitlement, or network access is added.
 
 Retention is checked on startup, log access, and writes, and approximately hourly while the app is running. Expired data is removed at the next such check; Cat Run cannot perform cleanup while it is closed. Unreadable ciphertext is retained for possible key recovery until its file age reaches seven days, then removed with an explicit unavailable-history message. A run marker is renewed if retention removes it while the app remains open, so long-running sessions can still report an unrecorded exit without claiming a new launch.
 
@@ -36,6 +38,9 @@ There is no updater, remote code, network service, analytics, or telemetry. The 
 
 - A valid 90% reading with no runtime estimate after wake or unplugging must allow a 15-minute timer without a forecast warning. Unknown runtime is not a low-battery prediction. Verify 30-second forecast settling, AC/wake invalidation, long observation gaps, and invalid runtime sentinels.
 - Below 15% battery: refuse activation and stop an active timer, both on battery and while connected to power. Confirm the boundary at 15% and 14%.
+- Exercise disagreeing fresh readers: a safe guard sample followed by a below-15% or unavailable interface sample must stop the active session, without waiting for another periodic read. A newer safe snapshot must not erase the unsafe observation. Preserve existing expiry/sleep priority and session-token checks.
+- Verify extension risk uses all remaining time plus 15 minutes, rapid requests add exactly one increment each, elapsed time does not replenish the six-hour total allowance, and the capped button clearly shows 06h limit. Keep the active slider aligned with remaining time through the final minutes.
+- Test open warning updates after forecast, charge, remaining-time, and AC changes. Continue must recheck safety and the current session; Cancel or stale confirmation adds no time. A risk disappearing while the sheet is open must not automatically extend the timer.
 - Missing battery readings on a battery-equipped Mac: do not silently assume a safe level. A desktop without an internal battery must be distinguished from an unreadable laptop battery.
 - Confirm that the app releases both system and display assertions on stop, expiry, low battery, and quit. Confirm that terminating the process leaves no assertion owned by that process.
 - Confirm the 30-second fallback interval for active-only periodic battery reads and immediate fresh reads before start/extension, on launch/activation/wake, and on macOS power-source notifications. Event-driven checks must not wait for the fallback. Confirm that idle periods perform no periodic battery polling.
@@ -49,6 +54,7 @@ There is no updater, remote code, network service, analytics, or telemetry. The 
 - Check malformed, oversized, unsupported-version, and symbolic-link journal inputs. A corrupt record must not be presented as a completed timer; a failed record write must not start unrecorded protection.
 - Check authenticated round trips, tampered ciphertext, wrong or missing keys, temporary Keychain denial, unavailable storage, and recovery without plaintext fallback. Verify that existing encrypted data in either the journal or logs prevents replacement-key creation.
 - Verify local log timestamps and timezone labels remain correct without the removed “Local time” heading. Verify log order after equal timestamps and wall-clock rollback; rolling seven-day expiry; the 4,000-entry and 2 MiB bounds; owner-only permissions; and cleanup after an interrupted atomic write. Test legacy journal/quarantine encryption, expiration, count limits, and unsafe-file rejection.
+- Verify compact Activity rows and Copy logs at both window limits. Copy all retained verified entries, not only visible rows; retain recording order, repeated day groups, timezone offsets, and long messages. Test empty/unavailable history and clipboard-write failures using an isolated pasteboard. Opening logs must not change the clipboard; no copy failure should be reported as success.
 - Verify app-run marker renewal after retention, unknown-cause recovery after force quit, and clean-quit deduplication. A delayed or failed log write must not delay release of power assertions. Exercise actual Keychain approval and signing changes on an installed bundle; injected-key tests do not prove those macOS interactions.
 - Verify sleep, wake, AC changes, screen locking, display changes, and window resizing on a real Mac. Power assertions cannot override all macOS sleep causes.
 - Test login registration, the approval-required state, disabling it, and an actual logout/login using the installed bundle. Do not enable login during an automated test.

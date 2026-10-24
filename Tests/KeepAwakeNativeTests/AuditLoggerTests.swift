@@ -134,6 +134,34 @@ final class AuditLoggerTests: XCTestCase {
         XCTAssertTrue(store.snapshot().events.contains { $0.message.contains("events may be missing") })
     }
 
+    func testCopySnapshotWaitsForEarlierQueuedWritesAndRunsCompletionOnMain() {
+        let store = Store()
+        let logger = AuditLogger(store: store, now: { self.now }, automaticallyPrune: false)
+        logger.record("First activity.")
+        logger.record("Latest activity.")
+        let copied = expectation(description: "fresh full snapshot")
+        logger.snapshotForCopy { snapshot in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertNil(snapshot.error)
+            XCTAssertEqual(snapshot.events.map(\.message), ["Latest activity.", "First activity."])
+            copied.fulfill()
+        }
+        wait(for: [copied], timeout: 2)
+    }
+
+    func testCopySnapshotReportsUnavailableOrIncompleteHistory() {
+        let store = Store()
+        store.fail = true
+        let logger = AuditLogger(store: store, now: { self.now }, automaticallyPrune: false)
+        logger.record("Could not be written.")
+        let copied = expectation(description: "write failure reported to copy")
+        logger.snapshotForCopy { snapshot in
+            XCTAssertEqual(snapshot.error, .storageUnavailable)
+            copied.fulfill()
+        }
+        wait(for: [copied], timeout: 2)
+    }
+
     private final class Store: AuditLogPersisting {
         private let lock = NSLock()
         private var events: [AuditEvent]

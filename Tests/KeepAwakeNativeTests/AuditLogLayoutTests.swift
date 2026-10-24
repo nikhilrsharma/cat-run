@@ -168,6 +168,126 @@ final class AuditLogLayoutTests: XCTestCase {
         }
     }
 
+    func testCopyWaitsForFreshVerifiedSnapshotAndIncludesOffscreenEvents() throws {
+        try onMain {
+            _ = NSApplication.shared
+            let pasteboard = NSPasteboard(name: .init("org.catrun.tests.copy.\(UUID().uuidString)"))
+            defer { pasteboard.releaseGlobally() }
+            pasteboard.clearContents(); XCTAssertTrue(pasteboard.setString("Previous clipboard", forType: .string), "Named test pasteboard must be accessible")
+            let page = AuditLogView(frame: NSRect(x: 0, y: 0, width: 372, height: 250), pasteboard: pasteboard)
+            let date = Date(timeIntervalSince1970: 1_792_272_600)
+            let cached = [AuditEvent(date: date, message: "Cached activity.")]
+            let fresh = (0..<120).map { AuditEvent(date: date.addingTimeInterval(Double(-$0)), message: "Fresh activity \($0).") }
+            let locale = Locale(identifier: "en_US")
+            let zone = TimeZone(secondsFromGMT: 0)!
+            page.render(events: cached, error: nil, locale: locale, timeZone: zone)
+            var completion: (([AuditEvent], String?) -> Void)?
+            var requests = 0
+            page.onCopyRequested = { callback in requests += 1; completion = callback }
+            let copy = try button("copy-logs", page)
+            XCTAssertEqual(pasteboard.string(forType: .string), "Previous clipboard", "Rendering must not copy")
+            copy.performClick(nil)
+            copy.performClick(nil)
+            XCTAssertEqual(requests, 1)
+            XCTAssertFalse(copy.isEnabled)
+            XCTAssertEqual(pasteboard.string(forType: .string), "Previous clipboard", "Do not copy the stale view snapshot")
+            try XCTUnwrap(completion)(fresh, nil)
+            XCTAssertEqual(pasteboard.string(forType: .string), AuditLogText.string(events: fresh, locale: locale, timeZone: zone))
+            XCTAssertEqual(copy.title, "Copied")
+            XCTAssertTrue(copy.isEnabled)
+            XCTAssertTrue(try XCTUnwrap(pasteboard.string(forType: .string)).contains("Fresh activity 119."))
+        }
+    }
+
+    func testUnavailableOrEmptyCopyPreservesExistingClipboard() throws {
+        try onMain {
+            _ = NSApplication.shared
+            let pasteboard = NSPasteboard(name: .init("org.catrun.tests.copy.\(UUID().uuidString)"))
+            defer { pasteboard.releaseGlobally() }
+            pasteboard.clearContents(); XCTAssertTrue(pasteboard.setString("Keep this clipboard", forType: .string), "Named test pasteboard must be accessible")
+            let page = AuditLogView(frame: NSRect(x: 0, y: 0, width: 372, height: 250), pasteboard: pasteboard)
+            let event = AuditEvent(date: Date(), message: "Verified old snapshot.")
+            let copy = try button("copy-logs", page)
+            XCTAssertFalse(copy.isEnabled)
+            page.render(events: [event], error: nil)
+            page.onCopyRequested = { complete in complete([event], "Logs unavailable. Verification failed.") }
+            copy.performClick(nil)
+            XCTAssertFalse(copy.isEnabled)
+            XCTAssertEqual(pasteboard.string(forType: .string), "Keep this clipboard")
+            page.render(events: [event], error: nil)
+            page.onCopyRequested = { complete in complete([], nil) }
+            copy.performClick(nil)
+            XCTAssertFalse(copy.isEnabled)
+            XCTAssertEqual(pasteboard.string(forType: .string), "Keep this clipboard")
+            XCTAssertFalse(AuditClipboard.copy("", to: pasteboard))
+            XCTAssertEqual(pasteboard.string(forType: .string), "Keep this clipboard")
+        }
+    }
+
+    func testCompactRowsAndCopyHeaderFitWithoutReducingTypeSize() throws {
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let root = try XCTUnwrap(controller.window?.contentView)
+            let page = try XCTUnwrap(try view("logs-page", root) as? AuditLogView)
+            let table = try XCTUnwrap(try view("logs-table", root) as? NSTableView)
+            controller.showLogs()
+            page.render(events: [.init(date: Date(), message: "Cat Run opened.")], error: nil,
+                        locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "America/Toronto")!)
+            for size in [controller.window!.minSize, controller.window!.maxSize] {
+                controller.window!.setFrame(NSRect(origin: .zero, size: size), display: false)
+                root.layoutSubtreeIfNeeded()
+                let heading = try view("logs-heading", page)
+                let copy = try button("copy-logs", page)
+                XCTAssertTrue(page.bounds.contains(copy.frame))
+                XCTAssertFalse(copy.frame.intersects(heading.frame))
+                XCTAssertLessThanOrEqual(table.rect(ofRow: 1).height, 30, "Short entries should not consume two lines plus large padding")
+                let cell = try XCTUnwrap(table.view(atColumn: 0, row: 1, makeIfNecessary: true))
+                cell.frame = NSRect(x: 0, y: 0, width: table.tableColumns[0].width, height: table.rect(ofRow: 1).height)
+                cell.layoutSubtreeIfNeeded()
+                for text in descendants(cell).compactMap({ $0 as? NSTextField }) {
+                    XCTAssertEqual(text.font?.pointSize, 13)
+                    XCTAssertGreaterThanOrEqual(text.frame.minY, 3)
+                    XCTAssertLessThanOrEqual(text.frame.maxY, cell.bounds.maxY - 3)
+                }
+            }
+        }
+    }
+
+    func testTimestampAndMessageColumnsStayAlignedAcrossOffsetChanges() throws {
+        try onMain {
+            let controller = makeWindow()
+            defer { controller.close() }
+            let root = try XCTUnwrap(controller.window?.contentView)
+            let page = try XCTUnwrap(try view("logs-page", root) as? AuditLogView)
+            let table = try XCTUnwrap(try view("logs-table", root) as? NSTableView)
+            let formatter = ISO8601DateFormatter()
+            let events = [
+                AuditEvent(date: try XCTUnwrap(formatter.date(from: "2026-10-25T01:30:00Z")), message: "After daylight saving."),
+                AuditEvent(date: try XCTUnwrap(formatter.date(from: "2026-10-25T00:30:00Z")), message: "Before daylight saving.")
+            ]
+            controller.showLogs()
+            page.render(events: events, error: nil, locale: Locale(identifier: "en_US"),
+                        timeZone: try XCTUnwrap(TimeZone(identifier: "Europe/London")))
+            for size in [controller.window!.minSize, controller.window!.maxSize] {
+                controller.window!.setFrame(NSRect(origin: .zero, size: size), display: false)
+                root.layoutSubtreeIfNeeded()
+                var origins: [CGFloat] = []
+                var timestamps: [String] = []
+                for row in 0..<table.numberOfRows where !table.delegate!.tableView!(table, isGroupRow: row) {
+                    let cell = try XCTUnwrap(table.view(atColumn: 0, row: row, makeIfNecessary: true))
+                    cell.frame = NSRect(x: 0, y: 0, width: table.tableColumns[0].width, height: table.rect(ofRow: row).height)
+                    cell.layoutSubtreeIfNeeded()
+                    origins.append(try view("log-message", cell).frame.minX)
+                    timestamps.append(try XCTUnwrap(try view("log-time", cell) as? NSTextField).stringValue)
+                }
+                XCTAssertEqual(origins.count, 2)
+                XCTAssertEqual(origins[0], origins[1], accuracy: 0.01)
+                XCTAssertNotEqual(timestamps[0], timestamps[1], "A repeated local hour must remain distinguishable")
+            }
+        }
+    }
+
     private func titleBrightness(_ button: FlatButton) throws -> CGFloat {
         let bitmap = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
         button.cacheDisplay(in: button.bounds, to: bitmap)

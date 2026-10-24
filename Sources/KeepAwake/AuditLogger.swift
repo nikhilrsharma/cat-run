@@ -80,6 +80,15 @@ final class AuditLogger {
 
     func refresh() { queue.async { self.publish() } }
 
+    /// Copy waits behind earlier log writes and reapplies retention/verification.
+    /// It never blocks AppKit or the timer-safety queue on disk or Keychain work.
+    func snapshotForCopy(_ completion: @escaping (AuditLogSnapshot) -> Void) {
+        queue.async {
+            let snapshot = self.currentSnapshot()
+            DispatchQueue.main.async { completion(snapshot) }
+        }
+    }
+
     /// Called only after power assertions have been released. A slow disk cannot block quit indefinitely.
     @discardableResult
     func finish(timeout: TimeInterval = 1) -> Bool {
@@ -112,7 +121,7 @@ final class AuditLogger {
         }
     }
 
-    private func publish() {
+    private func currentSnapshot() -> AuditLogSnapshot {
         var saved = store.snapshot()
         // Renew a retained run marker after pruning, including idle runs lasting
         // longer than seven days. This is observation time, never a new launch.
@@ -123,7 +132,11 @@ final class AuditLogger {
                 : "Cat Run session is active; logging resumed.", sessionID: runID, kind: .applicationOpened))
             saved = store.snapshot()
         }
-        let snapshot = AuditLogSnapshot(events: saved.events, error: saved.error ?? recordingError)
+        return AuditLogSnapshot(events: saved.events, error: saved.error ?? recordingError)
+    }
+
+    private func publish() {
+        let snapshot = currentSnapshot()
         if let callback { DispatchQueue.main.async { callback(snapshot) } }
     }
 

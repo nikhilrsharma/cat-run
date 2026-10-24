@@ -26,6 +26,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     var onLogin: ((Bool) -> Void)?
     var onLoginSettings: (() -> Void)?
     var onViewLogs: (() -> Void)?
+    var onCopyLogs: ((@escaping ([AuditEvent], String?) -> Void) -> Void)?
     var onShow: (() -> Void)?
     private let root = DarkView()
     private let main = FlippedView()
@@ -50,7 +51,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     private let battery = AppWindow.label("", size: 13)
     private let notice = AppWindow.label("", size: 14)
     private let start = FlatButton("Start", primary: true)
-    private let extend = FlatButton("+15m", size: 13)
+    private let extend = FlatButton("+15m", size: 13, dimWhenDisabled: true)
     private let login = CatCheckbox("Launch at login")
     private let loginNote = AppWindow.label("", size: 13)
     private let approval = FlatButton("Open Login Settings", size: 14)
@@ -148,8 +149,15 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         login.target = self; login.action = #selector(loginChanged)
         approval.onClick = { [weak self] in self?.onLoginSettings?() }
         viewLogs.onClick = { [weak self] in self?.showLogs() }
-        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.2"
-        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-18"
+        logs.onCopyRequested = { [weak self] completion in
+            guard let action = self?.onCopyLogs else {
+                completion([], "Logs unavailable. Try again.")
+                return
+            }
+            action(completion)
+        }
+        let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.3"
+        let updated = Bundle.main.object(forInfoDictionaryKey: "CatRunLastUpdated") as? String ?? "2026-10-24"
         version.stringValue = "Version \(number) · Updated \(updated)"
         settings.isHidden = true
         logs.isHidden = true
@@ -214,12 +222,25 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
     func render(_ state: WindowState) {
         title.stringValue = state.active ? "Remaining" : "Duration"
         time.stringValue = state.active ? CatStatusItem.time(state.remaining) : CatStatusItem.time(Double(state.duration * 60))
-        slider.doubleValue = Double(state.duration); slider.isEnabled = !state.active
+        // During a session the same track describes the remaining time above it.
+        // Removing tick snapping also lets the final 15 minutes reach zero.
+        slider.allowsTickMarkValuesOnly = false
+        slider.minValue = state.active ? 0 : 15
+        slider.numberOfTickMarks = state.active ? 0 : 24
+        slider.doubleValue = state.active ? max(0, min(360, state.remaining / 60)) : Double(state.duration)
+        slider.allowsTickMarkValuesOnly = !state.active
+        slider.isEnabled = !state.active
+        slider.setAccessibilityLabel(state.active ? "Remaining time in minutes" : "Duration in minutes")
         minus.isEnabled = !state.active && state.duration > 15; plus.isEnabled = !state.active && state.duration < 360
         screen.state = state.screenAwake ? .on : .off; screen.isEnabled = !state.active
         screen.toolTip = state.active ? nil : "Prevents the display from sleeping during the timer."
         start.title = state.active ? "Stop" : "Start"; start.isEnabled = state.active || state.canStart
         extend.isHidden = !state.active; extend.isEnabled = state.canExtend
+        extend.title = state.canExtend ? "+15m" : "06h limit"
+        extend.toolTip = state.canExtend ? "Add 15 minutes, up to six hours from the original start."
+            : "Six-hour session limit reached, including time already elapsed."
+        extend.setAccessibilityLabel(state.canExtend ? "Add 15 minutes" : "Six-hour session limit reached")
+        extend.setAccessibilityHelp(extend.toolTip)
         battery.stringValue = state.battery
         notice.stringValue = state.notice; notice.isHidden = state.notice.isEmpty
         login.state = state.loginEnabled ? .on : .off; login.isEnabled = !state.active
@@ -240,26 +261,36 @@ final class AppWindow: NSWindowController, NSWindowDelegate {
         layoutContent()
     }
     func present(showMain: Bool = false) { if showMain { showSettings(false) }; onShow?(); showWindow(nil); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); applyBounds() }
-    func confirmWarning(_ message: String, completion: @escaping (Bool) -> Void) {
+    func confirmWarning(_ message: String, isExtension: Bool = false, completion: @escaping (Bool) -> Void) {
         guard let window else { completion(false); return }
         cancelWarning()
-        let panel = makeWarningPanel(message)
+        let panel = makeWarningPanel(message, isExtension: isExtension)
         warningSheet = panel
         window.beginSheet(panel) { [weak self, weak panel] response in if self?.warningSheet === panel { self?.warningSheet = nil }; completion(response == .OK) }
     }
+    func updateWarning(_ message: String, isExtension: Bool = false) {
+        (warningSheet as? WarningPanel)?.update(message: message, isExtension: isExtension)
+    }
     // Build independently of presentation so its geometry can be checked offscreen.
-    func makeWarningPanel(_ message: String) -> NSPanel {
+    func makeWarningPanel(_ message: String, isExtension: Bool = false) -> WarningPanel {
         let panel = WarningPanel(contentRect: NSRect(x: 0, y: 0, width: 410, height: 260), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = "Battery warning"; panel.titlebarAppearsTransparent = true; panel.backgroundColor = DarkView.base
         panel.appearance = NSAppearance(named: .darkAqua)
         let background = DarkView(); panel.contentView = background
         let cancel = FlatButton("Cancel", primary: true); let proceed = FlatButton("Continue", size: 15)
-        cancel.keyEquivalent = "\r"; proceed.toolTip = "Start with automatic protection below 15%."
+        cancel.keyEquivalent = "\r"
+        let messageLabel = AppWindow.label(message, size: 15)
+        messageLabel.identifier = NSUserInterfaceItemIdentifier("warning-message")
+        proceed.identifier = NSUserInterfaceItemIdentifier("warning-continue")
+        panel.messageLabel = messageLabel; panel.continueButton = proceed
+        panel.update(message: message, isExtension: isExtension)
         let actions = NSStackView(views: [cancel, proceed]); actions.orientation = .horizontal; actions.spacing = 10; actions.distribution = .fillEqually
-        let content = NSStackView(views: [AppWindow.label("Battery warning", size: 21), AppWindow.label(message, size: 15), actions])
+        let content = NSStackView(views: [AppWindow.label("Battery warning", size: 21), messageLabel, actions])
         content.orientation = .vertical; content.alignment = .leading; content.spacing = 18
         background.addSubview(content); content.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 22), content.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -22), content.topAnchor.constraint(equalTo: background.topAnchor, constant: 20), content.bottomAnchor.constraint(lessThanOrEqualTo: background.bottomAnchor, constant: -20), cancel.heightAnchor.constraint(equalToConstant: 40), proceed.heightAnchor.constraint(equalToConstant: 40)])
+        // Live forecast updates must never move either decision under the pointer.
+        // Reserve the longest warning's text space even when the new copy is shorter.
+        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 22), content.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -22), content.topAnchor.constraint(equalTo: background.topAnchor, constant: 20), content.bottomAnchor.constraint(lessThanOrEqualTo: background.bottomAnchor, constant: -20), messageLabel.heightAnchor.constraint(equalToConstant: 100), cancel.heightAnchor.constraint(equalToConstant: 40), proceed.heightAnchor.constraint(equalToConstant: 40)])
         content.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true }
         cancel.onClick = { [weak self, weak panel] in guard let panel else { return }; self?.window?.endSheet(panel, returnCode: .cancel) }
         panel.onCancel = cancel.onClick
@@ -378,8 +409,19 @@ final class FlatButton: NSButton {
     }
     @objc private func invoke() { guard isEnabled else { return }; onClick?() }
 }
-private final class WarningPanel: NSPanel {
+final class WarningPanel: NSPanel {
     var onCancel: (() -> Void)?
+    fileprivate var messageLabel: NSTextField?
+    fileprivate var continueButton: NSButton?
+    func update(message: String, isExtension: Bool) {
+        messageLabel?.stringValue = message
+        messageLabel?.invalidateIntrinsicContentSize()
+        continueButton?.toolTip = isExtension
+            ? "Add 15 minutes; automatic protection below 15% remains active."
+            : "Start with automatic protection below 15%."
+        contentView?.needsLayout = true
+        contentView?.layoutSubtreeIfNeeded()
+    }
     override func cancelOperation(_ sender: Any?) { onCancel?() }
 }
 

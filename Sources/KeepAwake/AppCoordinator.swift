@@ -34,7 +34,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var tickTimer: Timer?
     private var expiryTimer: Timer?
     private var observers: [NSObjectProtocol] = []
-    private var pendingWarning: UUID?
+    private lazy var requests = SessionRequestFlow(safety: safety,
+        readBattery: { [monitor] in monitor.refresh() }, now: { ContinuousTime.now })
     private var sessionToken: UUID?
     private var lastRecord: SessionRecord?
     private var transientNotice = ""
@@ -98,6 +99,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         window.onLogin = { [weak self] enabled in self?.setLogin(enabled) }
         window.onLoginSettings = { [weak self] in guard let self, !self.model.active else { return }; self.login.openSystemSettings() }
         window.onViewLogs = { [weak self] in self?.audit.refresh() }
+        window.onCopyLogs = { [weak self] completion in
+            guard let self else { completion([], "Logs unavailable."); return }
+            self.audit.snapshotForCopy { completion($0.events, $0.error?.message) }
+        }
         window.onShow = { [weak self] in self?.refreshBattery() }
         status.onOpen = { [weak self] in
             guard let self else { return }
@@ -160,29 +165,31 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func requestStart(duration: Int? = nil, extensionRequest: Bool = false, confirmed: Bool = false) {
-        guard pendingWarning == nil, userSessionActive else { return }
-        // Drain older guard events before considering a new generation.
-        safety.checkNow()
+    private func requestStart(duration: Int? = nil, extensionRequest: Bool = false) {
+        request(.init(durationMinutes: duration ?? model.selectedDurationMinutes,
+                      isExtension: extensionRequest))
+    }
+
+    private func request(_ request: SessionRequestFlow.Request) {
+        guard userSessionActive else { return }
+        let evaluation = requests.prepare(request, model: model, sessionID: sessionToken)
+        if let fresh = evaluation.reading { reading = fresh }
         if consumeSafetyEvents() { render(); return }
-        if extensionRequest != model.active { return }
-        reading = monitor.refresh()
-        let selected = duration ?? model.selectedDurationMinutes
-        let result = extensionRequest
-            ? model.prepareExtension(battery: reading, now: ContinuousTime.now, confirmRisk: confirmed)
-            : model.prepareStart(durationMinutes: selected, battery: reading, now: ContinuousTime.now, confirmRisk: confirmed)
+        guard let result = evaluation.preparation else { return }
+        let extensionRequest = request.isExtension
         switch result {
         case .blocked(let reason):
             audit.record("\(extensionRequest ? "Extension" : "Start") blocked · \(reason.message)", sessionID: sessionToken)
             transientNotice = reason.message; render()
-        case .warning(_, let warning):
+        case .warning:
             audit.record("Battery warning shown before \(extensionRequest ? "extending" : "starting") the timer.", sessionID: sessionToken)
-            let token = UUID(); pendingWarning = token
-            window.confirmWarning(warning.message) { [weak self] accepted in
-                guard let self, self.pendingWarning == token else { return }
-                self.pendingWarning = nil
+            let pending = requests.beginWarning(for: request, sessionID: sessionToken)
+            let message = requests.warningMessage(model: model, reading: reading) ?? "Battery may fall below 15%."
+            window.confirmWarning(message, isExtension: extensionRequest) { [weak self] accepted in
+                guard let self, self.requests.warning?.id == pending.id else { return }
+                let resolved = self.requests.resolveWarning(id: pending.id, accepted: accepted, sessionID: self.sessionToken)
                 self.audit.record("Battery warning · \(accepted ? "Continue selected" : "Cancelled").", sessionID: self.sessionToken)
-                if accepted { self.requestStart(duration: selected, extensionRequest: extensionRequest, confirmed: true) }
+                if let resolved { self.request(resolved) }
             }
         case .ready(let plan):
             let token = sessionToken ?? UUID()
@@ -243,12 +250,16 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
         hasObservedPowerSource = true
         reading = fresh
+        safety.observeBattery(fresh, token: sessionToken)
         safety.checkNow()
         consumeSafetyEvents()
-        if pendingWarning != nil, fresh.hasBattery, (fresh.validPercent == nil || fresh.validPercent! < 15) {
+        if requests.warning != nil, fresh.hasBattery, (fresh.validPercent == nil || fresh.validPercent! < 15) {
             clearPending()
-            audit.record("Battery warning dismissed because current charge could not safely support a start.", sessionID: sessionToken)
+            audit.record("Battery warning dismissed because battery protection could not be verified.", sessionID: sessionToken)
             transientNotice = fresh.validPercent == nil ? StartBlockReason.batteryUnavailable.message : StartBlockReason.lowBattery.message
+        }
+        if let message = requests.warningMessage(model: model, reading: fresh), let pending = requests.warning {
+            window.updateWarning(message, isExtension: pending.request.isExtension)
         }
         let riskVisible = model.active && SessionModel.forecastWarning(battery: reading, seconds: model.remaining(at: ContinuousTime.now)) != nil
         if riskVisible && !forecastRiskWasVisible { audit.record("Battery forecast now falls below 15%; actual-charge protection remains active.", sessionID: sessionToken) }
@@ -282,7 +293,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
         return changed
     }
-    private func clearPending() { pendingWarning = nil; window.cancelWarning() }
+    private func clearPending() { requests.cancelWarning(); window.cancelWarning() }
     private func setLogin(_ enabled: Bool) {
         guard !model.active else { render(); return }
         do {
@@ -340,7 +351,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         if let requested = failedLoginRequest, LoginStatusText.isSatisfied(requested, by: loginStatus) { failedLoginRequest = nil }
         view.loginNote = LoginStatusText.note(for: loginStatus, failedRequest: failedLoginRequest)
         view.canStart = userSessionActive && (!reading.hasBattery || (reading.validPercent.map { $0 >= 15 } ?? false))
-        view.canExtend = model.totalDurationSeconds < 6 * 60 * 60
+        view.canExtend = model.active && model.totalDurationSeconds + 900 <= SessionModel.maximumSessionSeconds
         window.render(view)
         status.update(active: model.active, remaining: remaining, attention: !model.active && (lastRecord?.reason.map { $0 != "expired" && $0 != "manual" && $0 != "quit" } ?? !legacyNotice.isEmpty))
     }
